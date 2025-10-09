@@ -1,0 +1,148 @@
+# ===============================
+# OS and Editor noise
+# ===============================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.history/
+
+# ===============================
+# Python bytecode and build artifacts
+# ===============================
+__pycache__/
+*.py[cod]
+*$py.class
+build/
+dist/
+*.egg-info/
+.Python
+
+# ===============================
+# Virtual environments and Python version managers
+# ===============================
+.venv/
+venv/
+env/
+.env
+.env.*
+.python-version
+
+# ===============================
+# Jupyter
+# ===============================
+.ipynb_checkpoints/
+.jupyter/lab/workspaces/
+
+# ===============================
+# Testing, coverage, type-checker caches
+# ===============================
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# ===============================
+# Compiled extensions
+# ===============================
+*.so
+
+# ===============================
+# ML experiment outputs and logs
+# (keep code + configs in git; keep large/binary outputs out)
+# ===============================
+logs/
+runs/
+lightning_logs/
+tensorboard/
+wandb/
+mlruns/
+outputs/
+results/
+reports/
+figures/
+
+# Trained models and checkpoints
+models/
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.onnx
+*.joblib
+*.pkl
+*.h5
+
+# ===============================
+# Data (genomics + typical research data formats)
+# Prefer tracking data with DVC, LFS, or external storage
+# ===============================
+data/
+datasets/
+raw_data/
+interim_data/
+processed_data/
+
+# Allow placeholder files to keep directory structure in Git
+!data/.gitkeep
+!datasets/.gitkeep
+!raw_data/.gitkeep
+!interim_data/.gitkeep
+!processed_data/.gitkeep
+
+# Common genomics/data files (ignore anywhere in repo)
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.bam
+*.bai
+*.cram
+*.sam
+*.bcf
+*.vcf
+*.vcf.gz
+*.tbi
+*.fa
+*.fa.gz
+*.fasta
+*.fasta.gz
+*.gtf
+*.gff
+*.gff3
+*.bed
+*.bed.gz
+*.mtx
+*.loom
+*.h5ad
+*.hdf5
+*.npz
+*.npy
+*.parquet
+
+# ===============================
+# Data/versioning tools
+# ===============================
+.dvc/cache/
+.dvc/tmp/
+
+# ===============================
+# Cloud and credentials (store securely outside git)
+# ===============================
+.secrets/
+*.pem
+*.key
+*.crt
+credentials.json
+
+# ===============================
+# Caches and temp
+# ===============================
+.cache/
+*.log
+tmp/
+temp/
+

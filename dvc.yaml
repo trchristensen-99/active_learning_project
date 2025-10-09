@@ -1,0 +1,9 @@
+stages:
+  download_data:
+    cmd: python scripts/download_data.py --manifest data/manifest.csv --out data/raw
+    deps:
+      - scripts/download_data.py
+      - data/manifest.csv
+    outs:
+      - data/raw
+

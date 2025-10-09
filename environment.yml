@@ -1,0 +1,14 @@
+name: active-learning-genomics
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.10
+  - pip
+  - pip
+  - pip:
+      - pip>=23
+      - setuptools>=65
+      - wheel>=0.41
+      - dvc>=3,<4
+

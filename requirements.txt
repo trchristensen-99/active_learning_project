@@ -1,0 +1,5 @@
+dvc>=3,<4
+pip>=23
+setuptools>=65
+wheel>=0.41
+
