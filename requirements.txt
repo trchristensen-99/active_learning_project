@@ -3,3 +3,16 @@ pip>=23
 setuptools>=65
 wheel>=0.41
 
+# Deep learning and training
+# Note: PyTorch will be installed by setup_gpu.py based on GPU compatibility
+# torch>=2.0.0  # Commented out - auto-installed by GPU setup
+
+# Data processing and utilities
+pandas>=1.5.0
+numpy>=1.21.0
+tqdm>=4.64.0
+scipy>=1.9.0
+
+# Model inspection and visualization
+torchinfo>=1.8.0
+

@@ -1,0 +1,34 @@
+# DVC parameters for DREAM-RNN training pipeline
+
+# Data preprocessing parameters
+preprocess:
+  raw_dir: "data/raw"
+  out_dir: "data/processed"
+  splits: ["train", "val", "test"]
+
+# Training ensemble parameters
+train_ensemble:
+  model_type: "dream_rnn"
+  n_models: 5
+  epochs: 80
+  batch_size: 1024
+  lr: 0.005
+  base_seed: 42
+  device: "auto"  # Will auto-detect GPU if available
+  n_workers: 16
+  parallel: true  # Enable parallel training across multiple GPUs
+  
+  # Model-specific hyperparameters
+  seqsize: 249
+  in_channels: 5
+  out_channels: 320
+  lstm_hidden_channels: 320
+  kernel_sizes: [9, 15]
+  pool_size: 1
+  dropout1: 0.2
+  dropout2: 0.5
+
+# Prediction parameters
+predict:
+  batch_size: 32
+  device: "auto"

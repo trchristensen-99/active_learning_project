@@ -14,38 +14,81 @@ This project uses the [DeepSTARR manuscript data](https://doi.org/10.5281/zenodo
 
 ## Quick Start
 
-### 1. Clone and Setup Environment
+### Option 1: One-Command Setup (Recommended)
 
-Choose one of the following methods:
-
-#### Option A: Conda (Recommended)
 ```bash
 git clone <your-repo-url>
 cd active_learning_project
-conda env create -f environment.yml
-conda activate active-learning-genomics
+make setup
 ```
 
-#### Option B: Python venv
+This automatically:
+- Installs all dependencies
+- Detects your NVIDIA driver version
+- Installs compatible PyTorch
+- Tests GPU availability
+- Sets up the complete environment
+
+### Option 2: Manual Setup
+
+#### Step 1: Clone Repository
 ```bash
 git clone <your-repo-url>
 cd active_learning_project
+```
+
+#### Step 2: Choose Environment Method
+
+**Conda (Recommended):**
+```bash
+make conda-setup
+# OR manually:
+conda env create -f environment.yml
+conda activate active-learning-genomics
+conda run -n active-learning-genomics python scripts/setup_gpu.py
+```
+
+**Pip Virtual Environment:**
+```bash
+make pip-setup
+# OR manually:
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+python scripts/setup_gpu.py
 ```
 
-### 2. Initialize DVC and Download Data
+### GPU Setup Details
+
+The `setup_gpu.py` script automatically:
+- Detects your NVIDIA driver version
+- Installs the compatible PyTorch version
+- Tests GPU availability
+- Provides clear error messages if setup fails
+
+**Supported Driver Versions:**
+- 525+: PyTorch 2.1.0 with CUDA 12.1
+- 520-524: PyTorch 2.0.1 with CUDA 11.8
+- 515-519: PyTorch 1.13.1 with CUDA 11.7
+- 510-514: PyTorch 1.12.1 with CUDA 11.6
+- 470-509: PyTorch 1.11.0 with CUDA 11.5
+- 450-469: PyTorch 1.10.1 with CUDA 11.1
+
+### 3. Download Data and Train Models
 
 ```bash
-# Initialize DVC (if not already done)
-dvc init
+# Complete pipeline (recommended)
+make full-pipeline
 
-# Download the DeepSTARR dataset
-dvc repro
+# OR step by step:
+make data      # Download and preprocess data
+make train     # Train DREAM-RNN ensemble
+make predict   # Generate predictions
 
-# Verify the download
-ls -la data/raw/
+# OR using DVC directly:
+dvc repro download_data
+dvc repro preprocess_deepstarr  
+dvc repro train_dream_rnn_ensemble
 ```
 
 The dataset will be downloaded to `data/raw/` with the following files:
@@ -58,7 +101,42 @@ The dataset will be downloaded to `data/raw/` with the following files:
 - `Sequences_Train.fa` (116.9 MB) - Training set DNA sequences
 - `Sequences_Val.fa` (11.8 MB) - Validation set DNA sequences
 
-### 3. Configure DVC Remote (Optional)
+After preprocessing, the data will be available in `data/processed/` as TSV files:
+- `train.txt` - Training data with sequences and activity measurements
+- `val.txt` - Validation data
+- `test.txt` - Test data
+
+### 4. Train DREAM-RNN Models (Optional)
+
+To train DREAM-RNN ensemble models:
+
+```bash
+# Train ensemble of 5 models (this will take several hours)
+dvc repro train_dream_rnn_ensemble
+
+# Or train with custom parameters
+python scripts/train_ensemble.py \
+  --model_type dream_rnn \
+  --train_data data/processed/train.txt \
+  --val_data data/processed/val.txt \
+  --output_dir models/dream_rnn_ensemble \
+  --n_models 5 \
+  --epochs 80 \
+  --batch_size 32 \
+  --lr 0.005
+```
+
+### 5. Generate Predictions
+
+```bash
+# Generate predictions using trained ensemble
+python scripts/predict_ensemble.py \
+  --checkpoint_dir models/dream_rnn_ensemble \
+  --input_data data/processed/test.txt \
+  --output results/test_predictions.csv
+```
+
+### 6. Configure DVC Remote (Optional)
 
 To share data with collaborators or backup to cloud storage:
 
@@ -80,13 +158,87 @@ active_learning_project/
 ├── environment.yml          # Conda environment specification
 ├── dvc.yaml                 # DVC pipeline definition
 ├── dvc.lock                 # DVC lock file for reproducibility
+├── params.yaml              # DVC parameters for training
+├── code/                    # Core package
+│   ├── __init__.py
+│   ├── config.py           # Configuration management
+│   ├── utils.py            # Utility functions
+│   ├── prixfixe.py         # Streamlined Prix Fixe framework
+│   └── models/             # Model architectures
+│       ├── __init__.py
+│       ├── config.py       # Model registry
+│       └── dream_rnn.py    # DREAM-RNN implementation
 ├── data/
 │   ├── README.md           # Data documentation
 │   ├── manifest.csv        # Dataset URLs and checksums
 │   ├── .gitkeep           # Keeps data/ directory in Git
-│   └── raw/               # Downloaded datasets (ignored by Git)
+│   ├── raw/               # Downloaded datasets (ignored by Git)
+│   └── processed/         # Processed data (ignored by Git)
+├── models/                 # Trained models (ignored by Git)
+├── results/               # Experiment results (ignored by Git)
 └── scripts/
-    └── download_data.py    # Data download and verification script
+    ├── download_data.py    # Data download and verification script
+    ├── preprocess_deepstarr.py  # Data preprocessing
+    ├── train_ensemble.py   # Model training
+    └── predict_ensemble.py # Model prediction
+```
+
+## DREAM-RNN Training
+
+This project implements DREAM-RNN models using the Prix Fixe framework for genomic sequence analysis.
+
+### Model Architecture
+
+The DREAM-RNN model implements the winning architecture from the Random Promoter DREAM Challenge 2022:
+
+- **First Block**: Convolutional layers with kernel sizes [9, 15] and dropout (0.2)
+- **Core Block**: Bidirectional LSTM (320 hidden channels) + convolutional layers with dropout (0.5)
+- **Final Block**: Global average pooling + fully connected layers for two tasks (Dev, Hk activity)
+
+**Key Features:**
+- Input: 5-channel encoding (A,C,G,T,reverse_complement_indicator)
+- Sequence length: 249 bp (standardized for DeepSTARR data)
+- Total parameters: ~4.3M (efficient design)
+- Based on Prix Fixe framework for modular architecture
+
+### Training Pipeline
+
+1. **Data Preprocessing**: Merge FASTA sequences with activity measurements
+2. **Model Training**: Train ensemble of 5 models with different random seeds
+3. **Prediction**: Generate predictions with uncertainty quantification
+
+### Training Configuration
+
+Key hyperparameters can be adjusted in `params.yaml`:
+
+```yaml
+train_ensemble:
+  n_models: 5          # Number of models in ensemble
+  epochs: 80           # Training epochs (from DREAM Challenge)
+  batch_size: 32       # Batch size
+  lr: 0.005           # Learning rate (from DREAM Challenge)
+  out_channels: 320    # Model width (from DREAM Challenge)
+  lstm_hidden_channels: 320  # LSTM hidden size (from DREAM Challenge)
+  kernel_sizes: [9, 15] # Convolutional kernel sizes (from DREAM Challenge)
+  dropout1: 0.2        # Dropout for first/core blocks
+  dropout2: 0.5        # Dropout for core block
+```
+
+**Note**: All hyperparameters are based on the winning DREAM Challenge solution and have been validated on millions of random promoter sequences.
+
+### Model Files
+
+After training, the ensemble will be saved in `models/dream_rnn_ensemble/`:
+
+```
+models/dream_rnn_ensemble/
+├── model_0/           # Individual model directories
+│   └── model_best_MSE.pth
+├── model_1/
+│   └── model_best_MSE.pth
+├── ...
+├── training_config.json    # Training configuration
+└── training_results.json   # Training results
 ```
 
 ## Data Management

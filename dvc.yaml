@@ -1,9 +1,54 @@
 stages:
   download_data:
-    cmd: python scripts/download_data.py --manifest data/manifest.csv --out data/raw
+    cmd: python scripts/download_data.py --manifest data/manifest.csv --out data/raw --extract
     deps:
       - scripts/download_data.py
       - data/manifest.csv
     outs:
       - data/raw
+      
+  preprocess_deepstarr:
+    cmd: python scripts/preprocess_deepstarr.py --raw_dir data/raw --out_dir data/processed
+    deps:
+      - scripts/preprocess_deepstarr.py
+      - data/raw/Sequences_Train.fa
+      - data/raw/Sequences_Val.fa
+      - data/raw/Sequences_Test.fa
+      - data/raw/Sequences_activity_Train.txt
+      - data/raw/Sequences_activity_Val.txt
+      - data/raw/Sequences_activity_Test.txt
+    outs:
+      - data/processed/train.txt
+      - data/processed/val.txt
+      - data/processed/test.txt
+      
+  train_dream_rnn_ensemble:
+            cmd: python scripts/train_ensemble.py --model_type dream_rnn --train_data data/processed/train.txt --val_data data/processed/val.txt --output_dir models/dream_rnn_ensemble --n_models 5 --epochs 80 --batch_size 1024 --lr 0.005 --device auto --parallel
+    deps:
+      - scripts/train_ensemble.py
+      - code/models/dream_rnn.py
+      - code/models/config.py
+      - code/models/__init__.py
+      - data/processed/train.txt
+      - data/processed/val.txt
+    params:
+      - train_ensemble.model_type
+      - train_ensemble.n_models
+      - train_ensemble.epochs
+      - train_ensemble.batch_size
+      - train_ensemble.lr
+    outs:
+      - models/dream_rnn_ensemble
+      
+  predict_ensemble:
+    cmd: python scripts/predict_ensemble.py --checkpoint_dir models/dream_rnn_ensemble --input_data data/processed/test.txt --output results/test_predictions.csv --device auto
+    deps:
+      - scripts/predict_ensemble.py
+      - code/models/dream_rnn.py
+      - code/models/config.py
+      - code/models/__init__.py
+      - models/dream_rnn_ensemble
+      - data/processed/test.txt
+    outs:
+      - results/test_predictions.csv
 

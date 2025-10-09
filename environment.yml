@@ -1,14 +1,20 @@
 name: active-learning-genomics
 channels:
   - conda-forge
+  - pytorch
   - defaults
 dependencies:
   - python>=3.10
   - pip
-  - pip
+  - pandas>=1.5.0
+  - numpy>=1.21.0
+  - tqdm>=4.64.0
+  - scipy>=1.9.0
   - pip:
       - pip>=23
       - setuptools>=65
       - wheel>=0.41
       - dvc>=3,<4
+          - torchinfo>=1.8.0
+      # PyTorch will be installed by setup_gpu.py based on GPU compatibility
 
