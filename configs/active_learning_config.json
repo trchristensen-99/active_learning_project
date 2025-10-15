@@ -1,0 +1,44 @@
+{
+  "seed": 42,
+  "data": {
+    "initial_data_path": "data/processed/train.txt",
+    "n_initial": 20000
+  },
+  "oracle": {
+    "model_dir": "models/dream_rnn_ensemble",
+    "model_type": "dream_rnn",
+    "device": "auto",
+    "seqsize": 249
+  },
+  "trainer": {
+    "model_dir": "models/active_learning/student_model",
+    "device": "auto",
+    "seqsize": 249,
+    "in_channels": 4,
+    "num_epochs": 50,
+    "lr": 0.001,
+    "batch_size": 32,
+    "n_workers": 4,
+    "enable_replay": false,
+    "replay_buffer_size": 1000
+  },
+  "proposal_strategy": {
+    "type": "random",
+    "seqsize": 249,
+    "seed": 42
+  },
+  "acquisition_function": {
+    "type": "uncertainty",
+    "seed": 42
+  },
+  "active_learning": {
+    "output_dir": "results/active_learning",
+    "n_cycles": 5,
+    "n_candidates_per_cycle": 100000,
+    "n_acquire_per_cycle": 20000,
+    "training_strategy": "from_scratch"
+  }
+}
+
+
+

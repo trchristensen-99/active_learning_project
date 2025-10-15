@@ -1,0 +1,71 @@
+# Example: Testing different sequence sizes
+#
+# This demonstrates how to use the framework with different datasets
+# that have different sequence lengths.
+#
+# The seqsize parameter determines:
+#   - Length of generated sequences (for random proposal)
+#   - Expected input size for the student model
+#   - Must match the oracle model's expected input size
+#
+# Common sequence sizes:
+#   - DeepSTARR: 249 bp
+#   - Custom dataset 1: 500 bp
+#   - Custom dataset 2: 1000 bp
+
+base_config: configs/active_learning_random_random.json
+
+experiments:
+  # Standard DeepSTARR size (249 bp)
+  - run_index: 1
+    gpu: 1
+    proposal_strategy:
+      type: random
+      seqsize: 249
+    round0:
+      proposal_strategy:
+        type: random
+        seqsize: 249
+      acquisition_function:
+        type: random
+      n_candidates: 100000
+      n_acquire: 20000
+  
+  # Longer sequences (500 bp) - requires compatible oracle and student models
+  - run_index: 2
+    gpu: 2
+    proposal_strategy:
+      type: random
+      seqsize: 500
+    trainer:
+      seqsize: 500  # Student model must be configured for this size
+    oracle:
+      seqsize: 500  # Oracle model must support this size
+    round0:
+      proposal_strategy:
+        type: random
+        seqsize: 500
+      acquisition_function:
+        type: random
+      n_candidates: 100000
+      n_acquire: 20000
+  
+  # Even longer sequences (1000 bp)
+  - run_index: 3
+    gpu: 3
+    proposal_strategy:
+      type: random
+      seqsize: 1000
+    trainer:
+      seqsize: 1000
+    oracle:
+      seqsize: 1000
+    round0:
+      proposal_strategy:
+        type: random
+        seqsize: 1000
+      acquisition_function:
+        type: random
+      n_candidates: 100000
+      n_acquire: 20000
+

@@ -1,6 +1,6 @@
 # DREAM-RNN Training Pipeline Makefile
 
-.PHONY: help setup conda-setup pip-setup gpu-setup test clean
+.PHONY: help setup conda-setup pip-setup gpu-setup test clean active-learning test-active-learning
 
 help: ## Show this help message
 	@echo "DREAM-RNN Training Pipeline Setup"
@@ -54,6 +54,28 @@ clean: ## Clean up generated files
 	rm -rf results/test_predictions.csv
 	rm -rf data/processed
 	@echo "✅ Cleanup complete"
+
+active-learning: ## Run active learning pipeline
+	@echo "🧠 Running active learning pipeline..."
+	./scripts/gpu_wrapper.sh python scripts/run_active_learning.py --config configs/active_learning_config.json
+
+active-learning-finetune: ## Run active learning with fine-tuning
+	@echo "🧠 Running active learning with fine-tuning..."
+	./scripts/gpu_wrapper.sh python scripts/run_active_learning.py --config configs/active_learning_finetune_config.json
+
+test-active-learning: ## Test active learning framework
+	@echo "🧪 Testing active learning framework..."
+	./scripts/gpu_wrapper.sh python scripts/test_active_learning.py
+
+evaluate-gpu: ## Evaluate GPU capabilities and generate optimized configuration
+	@echo "🔍 Evaluating GPU capabilities..."
+	./scripts/gpu_wrapper.sh python scripts/evaluate_gpu_capability.py
+	@echo "🔧 Creating GPU-optimized configuration..."
+	./scripts/gpu_wrapper.sh python scripts/update_config_for_gpu.py --config configs/active_learning_full_config.json --adaptive
+
+active-learning-full: evaluate-gpu ## Run full active learning pipeline with GPU-optimized settings
+	@echo "🧠 Running full active learning pipeline with GPU-optimized configuration..."
+	./scripts/gpu_wrapper.sh python scripts/run_active_learning.py --config configs/active_learning_full_config_adaptive.json
 
 full-pipeline: setup data train predict ## Run complete pipeline: setup → data → train → predict
 	@echo "🎉 Complete pipeline finished!"

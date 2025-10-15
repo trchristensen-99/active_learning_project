@@ -146,3 +146,8 @@ credentials.json
 tmp/
 temp/
 
+# ===============================
+# Implementation summaries (development artifacts)
+# ===============================
+*_IMPLEMENTATION_SUMMARY.md
+

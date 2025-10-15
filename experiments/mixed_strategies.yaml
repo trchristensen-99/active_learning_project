@@ -1,0 +1,29 @@
+# Example: Testing different acquisition strategies with random proposal
+#
+# Note: Seeds are automatically calculated from run_index (seed = 42 + index * 1000)
+# You only need to specify the strategy type, not the seed
+
+base_config: configs/active_learning_random_random.json
+
+experiments:
+  # Random acquisition (seed will be 1042)
+  - run_index: 1
+    gpu: 1
+    acquisition_function:
+      type: random
+  
+  # Uncertainty acquisition (seed will be 2042)
+  - run_index: 2
+    gpu: 2
+    acquisition_function:
+      type: uncertainty
+  
+  # Different proposal strategy (seed will be 3042)
+  - run_index: 3
+    gpu: 3
+    proposal_strategy:
+      type: random
+      seqsize: 249
+    acquisition_function:
+      type: uncertainty
+

@@ -1,0 +1,56 @@
+{
+  "run_index": 0,
+  "active_learning": {
+    "n_cycles": 5,
+    "n_candidates_per_cycle": 100000,
+    "n_acquire_per_cycle": 20000,
+    "training_strategy": "from_scratch",
+    "output_dir": "results/active_learning_full"
+  },
+  "data": {
+    "initial_data_path": "data/processed/train.txt",
+    "n_initial": 20000,
+    "dataset_name": "train"
+  },
+  "oracle": {
+    "model_dir": "models/dream_rnn_ensemble",
+    "device": "auto",
+    "batch_size": 1024,
+    "architecture": "dream_rnn_ensemble"
+  },
+  "trainer": {
+    "model_dir": "results/active_learning_full/student_model",
+    "training_type": "from_scratch",
+    "architecture": "deepstarr",
+    "num_epochs": 100,
+    "batch_size": 8192,
+    "lr": 0.001,
+    "weight_decay": 1e-6,
+    "n_workers": 4,
+    "enable_replay": false,
+    "replay_buffer_size": 1000,
+    "early_stopping": true,
+    "early_stopping_patience": 10,
+    "lr_scheduler": "reduce_on_plateau",
+    "lr_factor": 0.2,
+    "lr_patience": 5
+  },
+  "proposal_strategy": {
+    "type": "random",
+    "seqsize": 249,
+    "seed": 42
+  },
+  "acquisition_function": {
+    "type": "uncertainty",
+    "seed": 42
+  },
+  "seed": 42,
+  "adaptive_settings": {
+    "gpu_memory_gb": 16.900227072,
+    "candidates_per_cycle": 100000,
+    "acquire_per_cycle": 20000,
+    "oracle_batch_size": 1024,
+    "student_batch_size": 8192,
+    "adaptation_reason": "Adjusted for 16.9GB GPU memory"
+  }
+}

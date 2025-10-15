@@ -23,7 +23,7 @@ stages:
       - data/processed/test.txt
       
   train_dream_rnn_ensemble:
-            cmd: python scripts/train_ensemble.py --model_type dream_rnn --train_data data/processed/train.txt --val_data data/processed/val.txt --output_dir models/dream_rnn_ensemble --n_models 5 --epochs 80 --batch_size 1024 --lr 0.005 --device auto --parallel
+    cmd: ./scripts/gpu_wrapper.sh python scripts/train_ensemble.py --model_type dream_rnn --train_data data/processed/train.txt --val_data data/processed/val.txt --output_dir models/dream_rnn_ensemble --n_models 5 --epochs 80 --batch_size 1024 --lr 0.005 --device auto --parallel
     deps:
       - scripts/train_ensemble.py
       - code/models/dream_rnn.py
@@ -41,7 +41,7 @@ stages:
       - models/dream_rnn_ensemble
       
   predict_ensemble:
-    cmd: python scripts/predict_ensemble.py --checkpoint_dir models/dream_rnn_ensemble --input_data data/processed/test.txt --output results/test_predictions.csv --device auto
+    cmd: ./scripts/gpu_wrapper.sh python scripts/predict_ensemble.py --checkpoint_dir models/dream_rnn_ensemble --input_data data/processed/test.txt --output results/test_predictions.csv --device auto
     deps:
       - scripts/predict_ensemble.py
       - code/models/dream_rnn.py
@@ -51,4 +51,43 @@ stages:
       - data/processed/test.txt
     outs:
       - results/test_predictions.csv
+
+  test_active_learning:
+    cmd: ./scripts/gpu_wrapper.sh python scripts/test_active_learning.py
+    deps:
+      - scripts/test_active_learning.py
+      - code/active_learning
+      - models/dream_rnn_ensemble
+    outs:
+      - results/test_active_learning
+
+  active_learning_random_random_idx1:
+    cmd: ./scripts/gpu_wrapper.sh python scripts/run_active_learning.py --config configs/active_learning_random_random.json --run-index 1
+    deps:
+      - scripts/run_active_learning.py
+      - configs/active_learning_random_random.json
+      - code/active_learning
+      - models/dream_rnn_ensemble
+    outs:
+      - results/random/random/100000cand_20000acq/deepstarr/dream_rnn_ensemble/random_random/idx1
+
+  active_learning_random_random_idx2:
+    cmd: ./scripts/gpu_wrapper.sh python scripts/run_active_learning.py --config configs/active_learning_random_random.json --run-index 2
+    deps:
+      - scripts/run_active_learning.py
+      - configs/active_learning_random_random.json
+      - code/active_learning
+      - models/dream_rnn_ensemble
+    outs:
+      - results/random/random/100000cand_20000acq/deepstarr/dream_rnn_ensemble/random_random/idx2
+
+  active_learning_random_random_idx3:
+    cmd: ./scripts/gpu_wrapper.sh python scripts/run_active_learning.py --config configs/active_learning_random_random.json --run-index 3
+    deps:
+      - scripts/run_active_learning.py
+      - configs/active_learning_random_random.json
+      - code/active_learning
+      - models/dream_rnn_ensemble
+    outs:
+      - results/random/random/100000cand_20000acq/deepstarr/dream_rnn_ensemble/random_random/idx3
 

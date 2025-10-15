@@ -110,6 +110,49 @@ def install_pytorch(torch_version, torchvision_version, torchaudio_version, cuda
         return False
 
 
+def fix_cudnn_compatibility():
+    """Fix cuDNN version compatibility issues."""
+    print("🔧 Checking cuDNN compatibility...")
+    
+    try:
+        import torch
+        # Test if cuDNN is working
+        torch.backends.cudnn.version()
+        print("✅ cuDNN compatibility check passed")
+        return True
+    except RuntimeError as e:
+        if "cuDNN version incompatibility" in str(e):
+            print("⚠️  cuDNN version incompatibility detected")
+            print("🔧 Creating GPU wrapper script to fix this issue...")
+            
+            # Create a wrapper script that clears LD_LIBRARY_PATH
+            wrapper_script = """#!/bin/bash
+# GPU training wrapper script
+# This script clears LD_LIBRARY_PATH to avoid cuDNN version conflicts
+unset LD_LIBRARY_PATH
+exec "$@"
+"""
+            
+            wrapper_path = Path(__file__).parent.parent / "scripts" / "gpu_wrapper.sh"
+            with open(wrapper_path, 'w') as f:
+                f.write(wrapper_script)
+            
+            # Make it executable
+            os.chmod(wrapper_path, 0o755)
+            
+            print(f"✅ Created GPU wrapper script: {wrapper_path}")
+            print("   Use this script to run GPU training commands:")
+            print(f"   ./scripts/gpu_wrapper.sh python your_script.py")
+            
+            return True
+        else:
+            print(f"❌ cuDNN error: {e}")
+            return False
+    except Exception as e:
+        print(f"❌ cuDNN check failed: {e}")
+        return False
+
+
 def test_gpu_availability():
     """Test if GPU is available after PyTorch installation."""
     try:
@@ -118,6 +161,10 @@ def test_gpu_availability():
             print(f"✅ GPU available: {torch.cuda.get_device_name()}")
             print(f"   GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
             print(f"   CUDA version: {torch.version.cuda}")
+            
+            # Check cuDNN compatibility
+            fix_cudnn_compatibility()
+            
             return True
         else:
             print("❌ GPU not available after installation")

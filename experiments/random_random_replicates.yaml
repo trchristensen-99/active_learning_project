@@ -1,0 +1,26 @@
+# Example experiment batch configuration
+# This runs 3 replicates of random proposal + random acquisition
+#
+# Seeds are automatically calculated from run_index:
+#   run_index 1 → seed 1042
+#   run_index 2 → seed 2042
+#   run_index 3 → seed 3042
+
+base_config: configs/active_learning_random_random.json
+
+experiments:
+  - run_index: 1
+    gpu: 1
+    # Uses default strategies from base_config
+    # Seed automatically set to 1042
+    
+  - run_index: 2
+    gpu: 2
+    # Uses default strategies from base_config
+    # Seed automatically set to 2042
+    
+  - run_index: 3
+    gpu: 3
+    # Uses default strategies from base_config
+    # Seed automatically set to 3042
+
