@@ -30,6 +30,7 @@ from code.active_learning import (
     CheckpointManager
 )
 from code.utils import one_hot_encode
+import subprocess
 
 
 def load_initial_data(data_path: str, n_initial: int = 20000) -> tuple:
@@ -59,15 +60,134 @@ def load_initial_data(data_path: str, n_initial: int = 20000) -> tuple:
     return sequences, labels
 
 
+def load_test_val_dataset(dataset_path: str) -> tuple:
+    """
+    Load test or validation dataset.
+    
+    Args:
+        dataset_path: Path to dataset TSV file
+        
+    Returns:
+        Tuple of (sequences, labels)
+    """
+    df = pd.read_csv(dataset_path, sep='\t', header=None, names=['Sequence', 'Dev', 'Hk'])
+    sequences = df['Sequence'].tolist()
+    labels = df[['Dev', 'Hk']].values
+    return sequences, labels
+
+
+def ensure_test_val_datasets(dataset_name: str, genomic_test: str, genomic_val: str, oracle_dir: str, seed: int = 42):
+    """
+    Ensure test/validation datasets exist, generate if needed.
+    
+    Args:
+        dataset_name: Name of dataset (e.g., 'deepstarr')
+        genomic_test: Path to genomic test set
+        genomic_val: Path to genomic validation set
+        oracle_dir: Path to oracle ensemble directory
+        seed: Random seed for generation
+    """
+    output_dir = Path('data/test_val_sets') / dataset_name
+    
+    # Check if datasets exist
+    required_types = ['no_shift', 'low_shift', 'high_shift_low_activity']
+    all_exist = all(
+        (output_dir / dtype / 'test.txt').exists() and 
+        (output_dir / dtype / 'val.txt').exists()
+        for dtype in required_types
+    )
+    
+    if all_exist:
+        print(f"Test/validation datasets for {dataset_name} already exist.")
+        return
+    
+    print(f"\nGenerating test/validation datasets for {dataset_name}...")
+    print("This may take several minutes as the oracle labels non-genomic sequences...")
+    
+    # Run generation script
+    cmd = [
+        'python', 'scripts/generate_test_val_datasets.py',
+        '--dataset', dataset_name,
+        '--genomic-test', genomic_test,
+        '--genomic-val', genomic_val,
+        '--oracle-dir', oracle_dir,
+        '--output-dir', 'data/test_val_sets',
+        '--seed', str(seed)
+    ]
+    
+    result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True)
+    
+    if result.returncode != 0:
+        print(f"Error generating datasets:\n{result.stderr}")
+        raise RuntimeError("Failed to generate test/validation datasets")
+    
+    print("Dataset generation complete!")
+
+
+def load_all_test_datasets(dataset_name: str, validation_dataset: str = 'genomic') -> tuple:
+    """
+    Load all test datasets and the specified validation dataset.
+    
+    Args:
+        dataset_name: Name of dataset (e.g., 'deepstarr')
+        validation_dataset: Name of validation dataset to use (e.g., 'genomic', '33noshift33lowshift34highshiftlowactivity')
+        
+    Returns:
+        Tuple of (test_datasets_dict, val_sequences, val_labels)
+    """
+    base_dir = Path('data/test_val_sets') / dataset_name
+    
+    # Load all test datasets
+    test_datasets = {}
+    test_types = ['no_shift', 'low_shift', 'high_shift_low_activity']
+    
+    for test_type in test_types:
+        test_path = base_dir / test_type / 'test.txt'
+        if test_path.exists():
+            sequences, labels = load_test_val_dataset(str(test_path))
+            test_datasets[test_type] = (sequences, labels)
+            print(f"Loaded {test_type} test set: {len(sequences)} sequences")
+    
+    # Load validation dataset
+    # Map common names to actual directory names
+    val_name_mapping = {
+        'genomic': 'no_shift',
+        'val_genomic': 'no_shift',
+        'noshift': 'no_shift',
+        'no_shift': 'no_shift'
+    }
+    
+    val_dir_name = val_name_mapping.get(validation_dataset.lower(), validation_dataset)
+    val_path = base_dir / val_dir_name / 'val.txt'
+    
+    if not val_path.exists():
+        raise FileNotFoundError(f"Validation dataset not found: {val_path}")
+    
+    val_sequences, val_labels = load_test_val_dataset(str(val_path))
+    print(f"Loaded {validation_dataset} validation set: {len(val_sequences)} sequences")
+    
+    return test_datasets, val_sequences, val_labels
+
+
 def create_oracle(oracle_config: dict) -> EnsembleOracle:
     """Create oracle ensemble."""
-    return EnsembleOracle(
-        model_dir=oracle_config['model_dir'],
-        model_type=oracle_config.get('model_type', 'dream_rnn'),
-        device=oracle_config.get('device', 'auto'),
-        seqsize=oracle_config.get('seqsize', 249),
-        batch_size=oracle_config.get('batch_size', 32)
-    )
+    # Check for new composition format
+    if 'composition' in oracle_config:
+        return EnsembleOracle(
+            composition=oracle_config['composition'],
+            device=oracle_config.get('device', 'auto'),
+            seqsize=oracle_config.get('seqsize', 249),
+            batch_size=oracle_config.get('batch_size', 32)
+        )
+    else:
+        # Legacy format
+        return EnsembleOracle(
+            model_dir=oracle_config.get('model_dir'),
+            model_type=oracle_config.get('model_type', 'dream_rnn'),
+            device=oracle_config.get('device', 'auto'),
+            seqsize=oracle_config.get('seqsize', 249),
+            batch_size=oracle_config.get('batch_size', 32)
+        )
 
 
 def create_trainer(trainer_config: dict) -> DeepSTARRActiveLearningTrainer:
@@ -200,17 +320,30 @@ def main():
     print(f"Run index: {config_manager.run_index}")
     print(f"Seed: {deterministic_seed}")
     print(f"Output directory: {output_dir}")
+    print(f"Dataset: {config_manager.dataset}")
+    print(f"Oracle composition: {config_manager.oracle_composition}")
+    print(f"Student composition: {config_manager.student_composition}")
     print(f"Proposal strategy: {config_manager.proposal_strategy}")
     print(f"Acquisition strategy: {config_manager.acquisition_strategy}")
     print(f"Candidates per cycle: {config_manager.n_candidates}")
     print(f"Acquire per cycle: {config_manager.n_acquire}")
-    print(f"Student architecture: {config_manager.student_arch}")
-    print(f"Oracle architecture: {config_manager.oracle_arch}")
-    print(f"Dataset: {config_manager.dataset}")
+    print(f"Round 0 initialization: {config_manager.round0_init}")
+    print(f"Validation dataset: {config_manager.validation_dataset}")
+    
+    # Show round 0 details
+    if 'round0' in config:
+        print(f"  - Round 0 proposal: {config['round0']['proposal_strategy']['type']}")
+        print(f"  - Round 0 acquisition: {config['round0']['acquisition_function']['type']}")
+        print(f"  - Round 0 candidates: {config['round0'].get('n_candidates', 100000)}")
+        print(f"  - Round 0 acquire: {config['round0'].get('n_acquire', 20000)}")
+    elif 'initial_data_path' in config.get('data', {}):
+        print(f"  - Using provided genomic sequences from: {config['data']['initial_data_path']}")
+        print(f"  - Number of initial sequences: {config['data'].get('n_initial', 20000)}")
     print()
     
     # Save configuration to run directory
     config_manager.save_config(Path(output_dir))
+    config_manager.save_metadata(Path(output_dir))
     
     # Create components
     print("Creating active learning components...")
@@ -250,6 +383,40 @@ def main():
         round0_n_candidates = config['round0'].get('n_candidates', 100000)
         round0_n_acquire = config['round0'].get('n_acquire', 20000)
     
+    # Load/generate test and validation datasets
+    print("\nLoading test and validation datasets...")
+    dataset_name = config['data'].get('dataset_name', 'deepstarr').replace('_train', '')  # e.g., 'deepstarr_train' -> 'deepstarr'
+    validation_dataset = config.get('validation_dataset', 'genomic')
+    
+    # Determine genomic test/val paths
+    genomic_test_path = config['data'].get('genomic_test_path', 'data/processed/test.txt')
+    genomic_val_path = config['data'].get('genomic_val_path', 'data/processed/val.txt')
+    
+    # Ensure test/val datasets exist (generate if needed)
+    # Get oracle_dir from composition or legacy format
+    if 'composition' in config['oracle']:
+        oracle_dir = config['oracle']['composition'][0]['model_dir']
+    else:
+        oracle_dir = config['oracle']['model_dir']
+    
+    ensure_test_val_datasets(
+        dataset_name=dataset_name,
+        genomic_test=genomic_test_path,
+        genomic_val=genomic_val_path,
+        oracle_dir=oracle_dir,
+        seed=deterministic_seed
+    )
+    
+    # Load all test datasets and validation dataset
+    test_datasets, val_sequences, val_labels = load_all_test_datasets(
+        dataset_name=dataset_name,
+        validation_dataset=validation_dataset
+    )
+    
+    # Set validation data on trainer
+    trainer.set_validation_data(val_sequences, val_labels)
+    print(f"Validation dataset '{validation_dataset}' set on trainer")
+    
     # Create active learning cycle with checkpoint support
     al_cycle = ActiveLearningCycle(
         oracle=oracle,
@@ -269,7 +436,8 @@ def main():
         round0_proposal_strategy=round0_proposal_strategy,
         round0_acquisition_function=round0_acquisition_function,
         round0_n_candidates=round0_n_candidates,
-        round0_n_acquire=round0_n_acquire
+        round0_n_acquire=round0_n_acquire,
+        test_datasets=test_datasets
     )
     
     # Run active learning (will auto-resume if checkpoints exist)

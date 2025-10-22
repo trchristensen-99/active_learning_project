@@ -27,6 +27,20 @@ class BaseProposalStrategy(ABC):
             List of proposed DNA sequences
         """
         pass
+    
+    def get_strategy_name(self, percentage: int = 100) -> str:
+        """
+        Get formatted strategy name with percentage.
+        
+        Args:
+            percentage: Percentage of sequences using this strategy (default 100)
+            
+        Returns:
+            Formatted string like "100random" or "50mixed"
+        """
+        # Default implementation uses class name
+        class_name = self.__class__.__name__.replace('ProposalStrategy', '').replace('Strategy', '').lower()
+        return f"{percentage}{class_name}"
 
 
 class RandomProposalStrategy(BaseProposalStrategy):

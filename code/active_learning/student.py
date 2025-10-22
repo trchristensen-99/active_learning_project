@@ -7,7 +7,7 @@ Implements the DeepSTARR architecture as specified in the DeepSTARR paper.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Generator
+from typing import Optional, Generator, List
 import numpy as np
 
 
@@ -155,8 +155,10 @@ class DeepSTARRTrainer:
         model: DeepSTARRStudent,
         device: torch.device,
         model_dir: str,
-        train_data_path: str,
-        val_data_path: str,
+        train_data_path: str = None,
+        val_data_path: str = None,
+        val_sequences: List[str] = None,
+        val_labels: np.ndarray = None,
         num_epochs: int = 50,
         lr: float = 0.001,
         weight_decay: float = 1e-6,
@@ -176,7 +178,9 @@ class DeepSTARRTrainer:
             device: Device to train on
             model_dir: Directory to save model
             train_data_path: Path to training data (TSV)
-            val_data_path: Path to validation data (TSV)
+            val_data_path: Path to validation data (TSV) - optional if val_sequences/val_labels provided
+            val_sequences: Validation sequences (alternative to val_data_path)
+            val_labels: Validation labels (alternative to val_data_path)
             num_epochs: Number of training epochs
             lr: Learning rate
             weight_decay: Weight decay for optimizer
@@ -208,9 +212,10 @@ class DeepSTARRTrainer:
         from ..prixfixe import DREAMRNNDataset
         from torch.utils.data import DataLoader
         
+        # Training data loader (always from file)
+        if train_data_path is None:
+            raise ValueError("train_data_path is required")
         self.train_dataset = DREAMRNNDataset(train_data_path, model.seqsize)
-        self.val_dataset = DREAMRNNDataset(val_data_path, model.seqsize)
-        
         self.train_loader = DataLoader(
             self.train_dataset,
             batch_size=batch_size,
@@ -218,6 +223,17 @@ class DeepSTARRTrainer:
             num_workers=n_workers,
             pin_memory=True
         )
+        
+        # Validation data loader (from file OR from sequences/labels)
+        if val_sequences is not None and val_labels is not None:
+            # Use provided validation data
+            from ..prixfixe import DREAMRNNInMemoryDataset
+            self.val_dataset = DREAMRNNInMemoryDataset(val_sequences, val_labels, model.seqsize)
+        elif val_data_path is not None:
+            # Use validation file
+            self.val_dataset = DREAMRNNDataset(val_data_path, model.seqsize)
+        else:
+            raise ValueError("Either val_data_path or (val_sequences and val_labels) must be provided")
         
         self.val_loader = DataLoader(
             self.val_dataset,

@@ -151,12 +151,14 @@ base_config: configs/active_learning_random_random.json
 experiments:
   - run_index: 1
     gpu: 1
-    acquisition_function: {type: random, seed: 42}
+    acquisition_function: {type: random}
     
   - run_index: 2
     gpu: 2
-    acquisition_function: {type: uncertainty, seed: 42}
+    acquisition_function: {type: uncertainty}
 ```
+
+**Note:** Seeds are automatically calculated from `run_index`, so don't specify them explicitly.
 
 ### 3. Round 0 Variations
 
@@ -169,8 +171,8 @@ experiments:
   - run_index: 1
     gpu: 1
     round0:
-      proposal_strategy: {type: random, seqsize: 249, seed: 42}
-      acquisition_function: {type: random, seed: 42}
+      proposal_strategy: {type: random, seqsize: 249}
+      acquisition_function: {type: random}
       n_candidates: 100000
       n_acquire: 20000
   
@@ -178,11 +180,17 @@ experiments:
   - run_index: 2
     gpu: 2
     round0:
-      proposal_strategy: {type: random, seqsize: 249, seed: 42}
-      acquisition_function: {type: uncertainty, seed: 42}
+      proposal_strategy: {type: random, seqsize: 249}
+      acquisition_function: {type: uncertainty}
       n_candidates: 100000
       n_acquire: 20000
 ```
+
+**Results will be saved to:**
+- Index 1: `results/.../deepstarr_train/init_random_random/idx1/`
+- Index 2: `results/.../deepstarr_train/init_random_uncertainty/idx2/`
+
+This allows direct comparison of initialization strategies.
 
 ## Command-Line Options
 
@@ -239,7 +247,7 @@ watch -n 1 nvidia-smi
 ps aux | grep run_active_learning
 
 # Check results directories
-ls -la results/random/random/*/deepstarr/dream_rnn_ensemble/*/
+ls -la results/random_proposal/random_acquisition/*/deepstarr/dream_rnn_ensemble/*/
 ```
 
 ## Results Organization
@@ -248,27 +256,156 @@ Results are automatically organized by configuration:
 
 ```
 results/
-  {proposal_strategy}/
-    {acquisition_strategy}/
+  {proposal_strategy}_proposal/
+    {acquisition_strategy}_acquisition/
       {n_cand}cand_{n_acq}acq/
         {student_arch}/
           {oracle_arch}/
             {dataset}/
-              idx{run_index}/
-                round_000/
-                round_001/
-                ...
-                config.json
-                summary.json
+              {round0_init}/
+                idx{run_index}/
+                  round_000/
+                  round_001/
+                  ...
+                  config.json
+                  summary.json
 ```
+
+**Directory Structure Explained:**
+- `{proposal_strategy}_proposal`: How sequences are generated (e.g., `random_proposal`)
+- `{acquisition_strategy}_acquisition`: How sequences are selected (e.g., `uncertainty_acquisition`)
+- `{dataset}`: Source dataset name (e.g., `deepstarr_train`)
+- `{round0_init}`: Round 0 initialization method:
+  - `init_genomic`: Pretrained on provided genomic sequences
+  - `init_random_random`: Pretrained on random proposal + random acquisition
+  - `init_random_uncertainty`: Pretrained on random proposal + uncertainty acquisition
 
 Example:
 ```
-results/random/random/100000cand_20000acq/deepstarr/dream_rnn_ensemble/random_random/
-├── idx1/
-├── idx2/
-└── idx3/
+results/random_proposal/random_acquisition/100000cand_20000acq/deepstarr/dream_rnn_ensemble/deepstarr_train/
+├── init_genomic/
+│   ├── genomic/          # Trained on genomic validation set
+│   │   ├── idx1/
+│   │   ├── idx2/
+│   │   └── idx3/
+│   └── low_shift/        # Trained on low_shift validation set
+│       ├── idx1/
+│       └── idx2/
+└── init_random_random/
+    ├── genomic/
+    │   ├── idx1/
+    │   ├── idx2/
+    │   └── idx3/
 ```
+
+## Multi-Test Dataset Evaluation
+
+All experiments automatically evaluate models on **three test datasets** with different distribution shifts:
+
+### Test Dataset Types
+
+1. **no_shift**: Original genomic sequences (~82k sequences)
+   - In-distribution performance
+   - Direct comparison to DeepSTARR paper results
+
+2. **low_shift**: Genomic sequences with 5% per-position mutations (~82k sequences)
+   - Minor distribution shift
+   - Tests robustness to sequence variations
+
+3. **high_shift_low_activity**: Random DNA sequences (~82k sequences)
+   - Major distribution shift
+   - Tests out-of-distribution behavior
+
+### Automatic Generation
+
+Test/validation datasets are automatically generated on first run:
+
+- **Location**: `data/test_val_sets/deepstarr/`
+- **Generation Time**: ~5-10 minutes (one-time, reused across all experiments)
+- **Progress Logging**: Shows 10% increments during oracle labeling
+- **Oracle Labeling**: Non-genomic datasets labeled by oracle ensemble
+
+### Validation Dataset Configuration
+
+Specify which validation set to use for training:
+
+```yaml
+experiments:
+  - run_index: 1
+    gpu: 1
+    # Use genomic validation set (default)
+    validation_dataset: genomic
+  
+  - run_index: 2
+    gpu: 2
+    # Use low_shift validation set
+    validation_dataset: low_shift
+```
+
+Or in JSON config:
+```json
+{
+  "validation_dataset": "genomic"
+}
+```
+
+### Evaluation Results
+
+Each round's `metrics.json` includes results for all test sets:
+
+```json
+{
+  "evaluation": {
+    "no_shift": {
+      "dev_mse": 1.234,
+      "hk_mse": 0.987,
+      "total_mse": 1.111,
+      "dev_correlation": 0.85,
+      "hk_correlation": 0.82,
+      "avg_correlation": 0.835,
+      "n_test_samples": 82372
+    },
+    "low_shift": {
+      "dev_mse": 1.456,
+      "hk_mse": 1.123,
+      "total_mse": 1.290,
+      "dev_correlation": 0.78,
+      "hk_correlation": 0.75,
+      "avg_correlation": 0.765,
+      "n_test_samples": 82372
+    },
+    "high_shift_low_activity": {
+      "dev_mse": 2.345,
+      "hk_mse": 2.123,
+      "total_mse": 2.234,
+      "dev_correlation": 0.45,
+      "hk_correlation": 0.42,
+      "avg_correlation": 0.435,
+      "n_test_samples": 82372
+    }
+  }
+}
+```
+
+### Comparing Performance Across Shifts
+
+```bash
+# Extract correlations for all test sets from a specific round
+jq '.round_3.evaluation | to_entries | map({type: .key, correlation: .value.avg_correlation})' \
+  results/.../idx1/summary.json
+
+# Compare no_shift vs high_shift performance
+jq '[.round_3.evaluation.no_shift.avg_correlation, .round_3.evaluation.high_shift_low_activity.avg_correlation]' \
+  results/.../idx1/summary.json
+```
+
+### Memory Management
+
+Large test sets (>80k sequences) are handled automatically:
+
+- **Batched Prediction**: 512 sequences per batch
+- **Prevents OOM**: Works on 16GB GPUs
+- **No Configuration Needed**: Automatic batching
 
 ## Tips
 

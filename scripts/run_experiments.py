@@ -312,16 +312,35 @@ Examples:
         base_config = batch.get('base_config')
         
         for exp in batch.get('experiments', []):
+            # Extract special keys (make a copy to avoid modifying original)
+            exp_copy = exp.copy()
+            run_index = exp_copy.pop('run_index')
+            gpu = exp_copy.pop('gpu', None)
+            proposal_strategy = exp_copy.pop('proposal_strategy', None)
+            acquisition_function = exp_copy.pop('acquisition_function', None)
+            round0_config = exp_copy.pop('round0', None)
+            
+            # Remaining keys are treated as overrides (with dot notation support)
+            overrides = {}
+            for key, value in exp_copy.items():
+                if isinstance(value, dict):
+                    # Flatten nested dicts with dot notation
+                    for subkey, subvalue in value.items():
+                        overrides[f"{key}.{subkey}"] = subvalue
+                else:
+                    overrides[key] = value
+            
             config = create_experiment_config(
                 base_config,
-                exp['run_index'],
-                proposal_strategy=exp.get('proposal_strategy'),
-                acquisition_function=exp.get('acquisition_function'),
-                round0_config=exp.get('round0')
+                run_index,
+                proposal_strategy=proposal_strategy,
+                acquisition_function=acquisition_function,
+                round0_config=round0_config,
+                **overrides
             )
             experiments.append({
                 'config': config,
-                'gpu': exp.get('gpu')
+                'gpu': gpu
             })
     
     elif args.base_config and args.run_indices:

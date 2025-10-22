@@ -48,7 +48,8 @@ class ActiveLearningCycle:
         round0_proposal_strategy: Optional[BaseProposalStrategy] = None,
         round0_acquisition_function: Optional[BaseAcquisitionFunction] = None,
         round0_n_candidates: Optional[int] = None,
-        round0_n_acquire: Optional[int] = None
+        round0_n_acquire: Optional[int] = None,
+        test_datasets: Optional[Dict[str, Tuple[List[str], np.ndarray]]] = None
     ):
         """
         Initialize active learning cycle.
@@ -97,6 +98,9 @@ class ActiveLearningCycle:
         # Initialize training data
         self.training_sequences = initial_sequences or []
         self.training_labels = initial_labels if initial_labels is not None else np.array([])
+        
+        # Test datasets for evaluation
+        self.test_datasets = test_datasets or {}
         
         # Check for existing checkpoints and resume if available
         self.last_completed_round = -1
@@ -245,38 +249,73 @@ class ActiveLearningCycle:
         return training_results
     
     def _evaluate_model(self, cycle_idx: int) -> Dict[str, Any]:
-        """Evaluate model performance."""
-        # For now, evaluate on a subset of training data
-        # In practice, you would have a separate test set
-        n_eval = min(1000, len(self.training_sequences))
-        eval_indices = np.random.choice(len(self.training_sequences), n_eval, replace=False)
+        """
+        Evaluate model performance on all test datasets.
         
-        eval_sequences = [self.training_sequences[i] for i in eval_indices]
-        eval_labels = self.training_labels[eval_indices]
-        
-        # Get model predictions
-        model_predictions = self.trainer.predict(eval_sequences)
-        
-        # Calculate metrics
-        dev_mse = np.mean((model_predictions[:, 0] - eval_labels[:, 0]) ** 2)
-        hk_mse = np.mean((model_predictions[:, 1] - eval_labels[:, 1]) ** 2)
-        total_mse = (dev_mse + hk_mse) / 2
-        
-        # Calculate correlations
+        Returns:
+            Dictionary with evaluation results for each test set type
+        """
         from scipy.stats import pearsonr
-        dev_corr, _ = pearsonr(model_predictions[:, 0], eval_labels[:, 0])
-        hk_corr, _ = pearsonr(model_predictions[:, 1], eval_labels[:, 1])
-        avg_corr = (dev_corr + hk_corr) / 2
         
-        return {
-            'dev_mse': float(dev_mse),
-            'hk_mse': float(hk_mse),
-            'total_mse': float(total_mse),
-            'dev_correlation': float(dev_corr),
-            'hk_correlation': float(hk_corr),
-            'avg_correlation': float(avg_corr),
-            'n_eval_samples': n_eval
-        }
+        evaluation_results = {}
+        
+        # Evaluate on each test dataset type
+        for test_type, (test_sequences, test_labels) in self.test_datasets.items():
+            print(f"  Evaluating on {test_type} test set ({len(test_sequences)} sequences)...")
+            
+            # Get model predictions
+            model_predictions = self.trainer.predict(test_sequences)
+            
+            # Calculate metrics
+            dev_mse = np.mean((model_predictions[:, 0] - test_labels[:, 0]) ** 2)
+            hk_mse = np.mean((model_predictions[:, 1] - test_labels[:, 1]) ** 2)
+            total_mse = (dev_mse + hk_mse) / 2
+            
+            # Calculate correlations
+            dev_corr, _ = pearsonr(model_predictions[:, 0], test_labels[:, 0])
+            hk_corr, _ = pearsonr(model_predictions[:, 1], test_labels[:, 1])
+            avg_corr = (dev_corr + hk_corr) / 2
+            
+            evaluation_results[test_type] = {
+                'dev_mse': float(dev_mse),
+                'hk_mse': float(hk_mse),
+                'total_mse': float(total_mse),
+                'dev_correlation': float(dev_corr),
+                'hk_correlation': float(hk_corr),
+                'avg_correlation': float(avg_corr),
+                'n_test_samples': len(test_sequences)
+            }
+        
+        # If no test datasets provided, fall back to training data subset (for backwards compatibility)
+        if not evaluation_results:
+            print("  Warning: No test datasets provided, evaluating on training subset...")
+            n_eval = min(1000, len(self.training_sequences))
+            eval_indices = np.random.choice(len(self.training_sequences), n_eval, replace=False)
+            
+            eval_sequences = [self.training_sequences[i] for i in eval_indices]
+            eval_labels = self.training_labels[eval_indices]
+            
+            model_predictions = self.trainer.predict(eval_sequences)
+            
+            dev_mse = np.mean((model_predictions[:, 0] - eval_labels[:, 0]) ** 2)
+            hk_mse = np.mean((model_predictions[:, 1] - eval_labels[:, 1]) ** 2)
+            total_mse = (dev_mse + hk_mse) / 2
+            
+            dev_corr, _ = pearsonr(model_predictions[:, 0], eval_labels[:, 0])
+            hk_corr, _ = pearsonr(model_predictions[:, 1], eval_labels[:, 1])
+            avg_corr = (dev_corr + hk_corr) / 2
+            
+            evaluation_results['training_subset'] = {
+                'dev_mse': float(dev_mse),
+                'hk_mse': float(hk_mse),
+                'total_mse': float(total_mse),
+                'dev_correlation': float(dev_corr),
+                'hk_correlation': float(hk_corr),
+                'avg_correlation': float(avg_corr),
+                'n_eval_samples': n_eval
+            }
+        
+        return evaluation_results
     
     def _save_cycle_results(self, cycle_idx: int, results: Dict[str, Any]):
         """Save results for a single cycle."""

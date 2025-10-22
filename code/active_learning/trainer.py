@@ -116,6 +116,21 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         # Model and trainer
         self.model = None
         self.trainer = None
+        
+        # External validation data (optional)
+        self.validation_sequences = None
+        self.validation_labels = None
+    
+    def set_validation_data(self, sequences: List[str], labels: np.ndarray):
+        """
+        Set external validation data to use for all training runs.
+        
+        Args:
+            sequences: Validation sequences
+            labels: Validation labels (n, 2) for [dev, hk]
+        """
+        self.validation_sequences = sequences
+        self.validation_labels = labels
     
     def _create_model(self) -> DeepSTARRStudent:
         """Create a new DeepSTARR model."""
@@ -163,8 +178,8 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         self,
         train_sequences: List[str],
         train_labels: np.ndarray,
-        val_sequences: List[str],
-        val_labels: np.ndarray,
+        val_sequences: List[str] = None,
+        val_labels: np.ndarray = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -173,8 +188,8 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         Args:
             train_sequences: Training sequences
             train_labels: Training labels (n_sequences, 2) for [dev, hk]
-            val_sequences: Validation sequences
-            val_labels: Validation labels
+            val_sequences: Validation sequences (optional if external validation set)
+            val_labels: Validation labels (optional if external validation set)
             **kwargs: Additional training parameters
             
         Returns:
@@ -185,20 +200,28 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         # Create new model
         self.model = self._create_model()
         
-        # Save data to temporary TSV files
+        # Use external validation data if set, otherwise use provided
+        if self.validation_sequences is not None and self.validation_labels is not None:
+            val_seqs = self.validation_sequences
+            val_labs = self.validation_labels
+        elif val_sequences is not None and val_labels is not None:
+            val_seqs = val_sequences
+            val_labs = val_labels
+        else:
+            raise ValueError("Validation data must be provided either via set_validation_data() or as arguments")
+        
+        # Save training data to temporary TSV file
         train_data_path = self.model_dir / "temp_train.tsv"
-        val_data_path = self.model_dir / "temp_val.tsv"
-        
         self._save_data_to_tsv(train_sequences, train_labels, str(train_data_path))
-        self._save_data_to_tsv(val_sequences, val_labels, str(val_data_path))
         
-        # Create trainer
+        # Create trainer with external validation data
         self.trainer = DeepSTARRTrainer(
             model=self.model,
             device=self.device,
             model_dir=str(self.model_dir),
             train_data_path=str(train_data_path),
-            val_data_path=str(val_data_path),
+            val_sequences=val_seqs,
+            val_labels=val_labs,
             num_epochs=self.num_epochs,
             lr=self.lr,
             weight_decay=self.weight_decay,
@@ -216,7 +239,6 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         
         # Clean up temporary files
         train_data_path.unlink(missing_ok=True)
-        val_data_path.unlink(missing_ok=True)
         
         # Update replay buffer if enabled
         if self.enable_replay:
@@ -262,25 +284,29 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
             all_sequences = new_sequences
             all_labels = new_labels
         
-        # Split into train/val (80/20)
-        n_total = len(all_sequences)
-        n_train = int(0.8 * n_total)
+        # Use external validation data if set, otherwise split train/val
+        if self.validation_sequences is not None and self.validation_labels is not None:
+            train_sequences = all_sequences
+            train_labels = all_labels
+            val_seqs = self.validation_sequences
+            val_labs = self.validation_labels
+        else:
+            # Split into train/val (80/20)
+            n_total = len(all_sequences)
+            n_train = int(0.8 * n_total)
+            
+            indices = np.random.permutation(n_total)
+            train_indices = indices[:n_train]
+            val_indices = indices[n_train:]
+            
+            train_sequences = [all_sequences[i] for i in train_indices]
+            train_labels = all_labels[train_indices]
+            val_seqs = [all_sequences[i] for i in val_indices]
+            val_labs = all_labels[val_indices]
         
-        indices = np.random.permutation(n_total)
-        train_indices = indices[:n_train]
-        val_indices = indices[n_train:]
-        
-        train_sequences = [all_sequences[i] for i in train_indices]
-        train_labels = all_labels[train_indices]
-        val_sequences = [all_sequences[i] for i in val_indices]
-        val_labels = all_labels[val_indices]
-        
-        # Save data to temporary TSV files
+        # Save training data to temporary TSV file
         train_data_path = self.model_dir / "temp_finetune_train.tsv"
-        val_data_path = self.model_dir / "temp_finetune_val.tsv"
-        
         self._save_data_to_tsv(train_sequences, train_labels, str(train_data_path))
-        self._save_data_to_tsv(val_sequences, val_labels, str(val_data_path))
         
         # Create trainer with lower learning rate for fine-tuning
         finetune_lr = kwargs.get('finetune_lr', self.lr * 0.1)
@@ -291,7 +317,8 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
             device=self.device,
             model_dir=str(self.model_dir),
             train_data_path=str(train_data_path),
-            val_data_path=str(val_data_path),
+            val_sequences=val_seqs,
+            val_labels=val_labs,
             num_epochs=finetune_epochs,
             lr=finetune_lr,
             weight_decay=self.weight_decay,
@@ -309,7 +336,6 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         
         # Clean up temporary files
         train_data_path.unlink(missing_ok=True)
-        val_data_path.unlink(missing_ok=True)
         
         # Update replay buffer
         if self.enable_replay:
@@ -352,28 +378,37 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         
         self.model.eval()
         
-        # Encode sequences
-        encoded_seqs = []
-        for seq in sequences:
-            encoded = one_hot_encode(seq)
-            # Convert list to tensor and add reverse complement indicator
-            encoded_tensor = torch.tensor(encoded, dtype=torch.float32)
-            # Add reverse complement indicator (0 for forward sequences)
-            rev_indicator = torch.zeros(encoded_tensor.shape[0], 1)
-            encoded_with_rev = torch.cat([encoded_tensor, rev_indicator], dim=1)
-            # Transpose to (channels, sequence) format
-            encoded_with_rev = encoded_with_rev.transpose(0, 1)
-            encoded_seqs.append(encoded_with_rev)
+        # Process in batches to avoid OOM
+        batch_size = 512
+        all_predictions = []
         
-        # Stack into batch
-        batch = torch.stack(encoded_seqs).to(self.device)
+        for i in range(0, len(sequences), batch_size):
+            batch_sequences = sequences[i:i + batch_size]
+            
+            # Encode sequences
+            encoded_seqs = []
+            for seq in batch_sequences:
+                encoded = one_hot_encode(seq)
+                # Convert list to tensor and add reverse complement indicator
+                encoded_tensor = torch.tensor(encoded, dtype=torch.float32)
+                # Add reverse complement indicator (0 for forward sequences)
+                rev_indicator = torch.zeros(encoded_tensor.shape[0], 1)
+                encoded_with_rev = torch.cat([encoded_tensor, rev_indicator], dim=1)
+                # Transpose to (channels, sequence) format
+                encoded_with_rev = encoded_with_rev.transpose(0, 1)
+                encoded_seqs.append(encoded_with_rev)
+            
+            # Stack into batch
+            batch = torch.stack(encoded_seqs).to(self.device)
+            
+            # Make predictions
+            with torch.no_grad():
+                dev_pred, hk_pred = self.model(batch)
+                predictions = torch.cat([dev_pred, hk_pred], dim=1)
+            
+            all_predictions.append(predictions.cpu().numpy())
         
-        # Make predictions
-        with torch.no_grad():
-            dev_pred, hk_pred = self.model(batch)
-            predictions = torch.cat([dev_pred, hk_pred], dim=1)
-        
-        return predictions.cpu().numpy()
+        return np.vstack(all_predictions)
     
     def evaluate(self, sequences: List[str], labels: np.ndarray) -> Dict[str, float]:
         """

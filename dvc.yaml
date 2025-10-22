@@ -52,6 +52,18 @@ stages:
     outs:
       - results/test_predictions.csv
 
+  generate_test_val_datasets_deepstarr:
+    cmd: ./scripts/gpu_wrapper.sh python scripts/generate_test_val_datasets.py --dataset deepstarr --genomic-test data/processed/test.txt --genomic-val data/processed/val.txt --oracle-dir models/dream_rnn_ensemble --output-dir data/test_val_sets --seed 42
+    deps:
+      - scripts/generate_test_val_datasets.py
+      - code/active_learning/dataset_generators.py
+      - configs/test_val_datasets.yaml
+      - data/processed/test.txt
+      - data/processed/val.txt
+      - models/dream_rnn_ensemble
+    outs:
+      - data/test_val_sets/deepstarr
+
   test_active_learning:
     cmd: ./scripts/gpu_wrapper.sh python scripts/test_active_learning.py
     deps:
@@ -68,8 +80,9 @@ stages:
       - configs/active_learning_random_random.json
       - code/active_learning
       - models/dream_rnn_ensemble
+      - data/test_val_sets/deepstarr
     outs:
-      - results/random/random/100000cand_20000acq/deepstarr/dream_rnn_ensemble/random_random/idx1
+      - results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/100random_acquisition/100000cand_20000acq/init_prop_random_acq_random_20k/val_genomic/idx1
 
   active_learning_random_random_idx2:
     cmd: ./scripts/gpu_wrapper.sh python scripts/run_active_learning.py --config configs/active_learning_random_random.json --run-index 2
@@ -78,8 +91,9 @@ stages:
       - configs/active_learning_random_random.json
       - code/active_learning
       - models/dream_rnn_ensemble
+      - data/test_val_sets/deepstarr
     outs:
-      - results/random/random/100000cand_20000acq/deepstarr/dream_rnn_ensemble/random_random/idx2
+      - results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/100random_acquisition/100000cand_20000acq/init_prop_random_acq_random_20k/val_genomic/idx2
 
   active_learning_random_random_idx3:
     cmd: ./scripts/gpu_wrapper.sh python scripts/run_active_learning.py --config configs/active_learning_random_random.json --run-index 3
@@ -88,6 +102,74 @@ stages:
       - configs/active_learning_random_random.json
       - code/active_learning
       - models/dream_rnn_ensemble
+      - data/test_val_sets/deepstarr
     outs:
-      - results/random/random/100000cand_20000acq/deepstarr/dream_rnn_ensemble/random_random/idx3
+      - results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/100random_acquisition/100000cand_20000acq/init_prop_random_acq_random_20k/val_genomic/idx3
+
+  # Genomic initialization experiments (20k acquisition per cycle)
+  active_learning_genomic_init_idx1:
+    cmd: ./scripts/gpu_wrapper.sh python scripts/run_active_learning.py --config configs/active_learning_genomic_init.json --run-index 1
+    deps:
+      - scripts/run_active_learning.py
+      - configs/active_learning_genomic_init.json
+      - code/active_learning
+      - models/dream_rnn_ensemble
+      - data/test_val_sets/deepstarr
+    outs:
+      - results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/100random_acquisition/100000cand_20000acq/init_prop_genomic_acq_random_20k/val_genomic/idx1
+
+  active_learning_genomic_init_idx2:
+    cmd: ./scripts/gpu_wrapper.sh python scripts/run_active_learning.py --config configs/active_learning_genomic_init.json --run-index 2
+    deps:
+      - scripts/run_active_learning.py
+      - configs/active_learning_genomic_init.json
+      - code/active_learning
+      - models/dream_rnn_ensemble
+      - data/test_val_sets/deepstarr
+    outs:
+      - results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/100random_acquisition/100000cand_20000acq/init_prop_genomic_acq_random_20k/val_genomic/idx2
+
+  active_learning_genomic_init_idx3:
+    cmd: ./scripts/gpu_wrapper.sh python scripts/run_active_learning.py --config configs/active_learning_genomic_init.json --run-index 3
+    deps:
+      - scripts/run_active_learning.py
+      - configs/active_learning_genomic_init.json
+      - code/active_learning
+      - models/dream_rnn_ensemble
+      - data/test_val_sets/deepstarr
+    outs:
+      - results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/100random_acquisition/100000cand_20000acq/init_prop_genomic_acq_random_20k/val_genomic/idx3
+
+  # Genomic initialization experiments (10k acquisition per cycle)
+  # Using YAML batch file for easier reproducibility
+  active_learning_genomic_init_10k_batch:
+    cmd: ./scripts/gpu_wrapper.sh python scripts/run_experiments.py --config experiments/genomic_init_10k_replicates.yaml --wait
+    deps:
+      - scripts/run_active_learning.py
+      - scripts/run_experiments.py
+      - experiments/genomic_init_10k_replicates.yaml
+      - configs/active_learning_genomic_init.json
+      - code/active_learning
+      - models/dream_rnn_ensemble
+      - data/test_val_sets/deepstarr
+    outs:
+      - results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/100random_acquisition/100000cand_10000acq/init_prop_genomic_acq_random_20k/val_genomic/idx4
+      - results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/100random_acquisition/100000cand_10000acq/init_prop_genomic_acq_random_20k/val_genomic/idx5
+      - results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/100random_acquisition/100000cand_10000acq/init_prop_genomic_acq_random_20k/val_genomic/idx6
+
+  # Or run genomic 20k experiments as a batch
+  active_learning_genomic_init_20k_batch:
+    cmd: ./scripts/gpu_wrapper.sh python scripts/run_experiments.py --config experiments/genomic_init_replicates.yaml --wait
+    deps:
+      - scripts/run_active_learning.py
+      - scripts/run_experiments.py
+      - experiments/genomic_init_replicates.yaml
+      - configs/active_learning_genomic_init.json
+      - code/active_learning
+      - models/dream_rnn_ensemble
+      - data/test_val_sets/deepstarr
+    outs:
+      - results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/100random_acquisition/100000cand_20000acq/init_prop_genomic_acq_random_20k/val_genomic/idx1
+      - results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/100random_acquisition/100000cand_20000acq/init_prop_genomic_acq_random_20k/val_genomic/idx2
+      - results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/100random_acquisition/100000cand_20000acq/init_prop_genomic_acq_random_20k/val_genomic/idx3
 

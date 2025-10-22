@@ -1,0 +1,15 @@
+# Genomic initialization replicates
+# Three replicates with genomic DNA pretraining (20k sequences from DeepSTARR train set)
+# Followed by random proposal + random acquisition active learning
+
+base_config: configs/active_learning_genomic_init.json
+
+experiments:
+  - run_index: 1
+    gpu: 1
+  
+  - run_index: 2
+    gpu: 2
+  
+  - run_index: 3
+    gpu: 3

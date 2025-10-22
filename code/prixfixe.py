@@ -238,6 +238,57 @@ class DREAMRNNDataset(Dataset):
         return np.array([mapping.get(base.upper(), [0, 0, 0, 0]) for base in seq])
 
 
+class DREAMRNNInMemoryDataset(Dataset):
+    """In-memory dataset for DREAM-RNN training with pre-loaded sequences and labels."""
+    
+    def __init__(self, sequences: list, labels: np.ndarray, seqsize: int = 249):
+        """
+        Initialize in-memory dataset.
+        
+        Args:
+            sequences: List of DNA sequences
+            labels: Array of shape (n, 2) with dev and hk activities
+            seqsize: Sequence length
+        """
+        self.sequences = sequences
+        self.labels = labels
+        self.seqsize = seqsize
+        
+    def __len__(self):
+        return len(self.sequences)
+    
+    def __getitem__(self, idx):
+        # Get sequence and encode
+        sequence = self.sequences[idx]
+        if len(sequence) != self.seqsize:
+            # Pad or truncate to seqsize
+            if len(sequence) > self.seqsize:
+                sequence = sequence[:self.seqsize]
+            else:
+                sequence = sequence + 'N' * (self.seqsize - len(sequence))
+        
+        # One-hot encode sequence
+        encoded_seq = self._one_hot_encode(sequence)
+        
+        # Add reverse complement indicator (0 for non-genomic sequences)
+        rev_indicator = 0
+        encoded_seq_with_rev = np.concatenate([encoded_seq, [[rev_indicator]] * self.seqsize], axis=1)
+        
+        # Convert to tensor
+        x = torch.tensor(encoded_seq_with_rev.transpose(1, 0), dtype=torch.float32)
+        
+        # Get targets
+        dev_target = torch.tensor(self.labels[idx, 0], dtype=torch.float32)
+        hk_target = torch.tensor(self.labels[idx, 1], dtype=torch.float32)
+        
+        return x, (dev_target, hk_target)
+    
+    def _one_hot_encode(self, seq: str) -> np.ndarray:
+        """One-hot encode DNA sequence."""
+        mapping = {'A': [1, 0, 0, 0], 'G': [0, 1, 0, 0], 'C': [0, 0, 1, 0], 'T': [0, 0, 0, 1], 'N': [0, 0, 0, 0]}
+        return np.array([mapping.get(base.upper(), [0, 0, 0, 0]) for base in seq])
+
+
 class DREAMRNNTrainer:
     """Trainer for DREAM-RNN model."""
     

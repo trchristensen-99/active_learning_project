@@ -1,0 +1,23 @@
+# Genomic initialization replicates with 10k acquisition per cycle
+# Three replicates with genomic DNA pretraining (20k sequences from DeepSTARR train set)
+# Followed by random proposal + random acquisition active learning
+# 100k candidates -> 10k acquired per cycle (instead of 20k)
+
+base_config: configs/active_learning_genomic_init.json
+
+experiments:
+  - run_index: 4
+    gpu: 4
+    active_learning:
+      n_acquire_per_cycle: 10000
+  
+  - run_index: 5
+    gpu: 5
+    active_learning:
+      n_acquire_per_cycle: 10000
+  
+  - run_index: 6
+    gpu: 6
+    active_learning:
+      n_acquire_per_cycle: 10000
+

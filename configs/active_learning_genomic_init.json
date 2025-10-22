@@ -6,24 +6,14 @@
     "n_candidates_per_cycle": 100000,
     "n_acquire_per_cycle": 20000,
     "training_strategy": "from_scratch",
-    "output_dir": "results/active_learning_random_random"
+    "output_dir": "results/active_learning_genomic_init"
   },
   "data": {
+    "initial_data_path": "data/processed/train.txt",
+    "n_initial": 20000,
     "dataset_name": "deepstarr",
     "genomic_test_path": "data/processed/test.txt",
-    "genomic_val_path": "data/processed/val.txt",
-    "n_initial": 20000
-  },
-  "round0": {
-    "proposal_strategy": {
-      "type": "random",
-      "seqsize": 249
-    },
-    "acquisition_function": {
-      "type": "random"
-    },
-    "n_candidates": 100000,
-    "n_acquire": 20000
+    "genomic_val_path": "data/processed/val.txt"
   },
   "oracle": {
     "composition": [
@@ -37,7 +27,7 @@
     "batch_size": 1024
   },
   "trainer": {
-    "model_dir": "results/active_learning_random_random/student_model",
+    "model_dir": "results/active_learning_genomic_init/student_model",
     "training_type": "from_scratch",
     "architecture": "deepstarr",
     "num_epochs": 100,

@@ -34,6 +34,20 @@ class BaseAcquisitionFunction(ABC):
             List of selected sequences
         """
         pass
+    
+    def get_strategy_name(self, percentage: int = 100) -> str:
+        """
+        Get formatted strategy name with percentage.
+        
+        Args:
+            percentage: Percentage of sequences using this strategy (default 100)
+            
+        Returns:
+            Formatted string like "100random" or "50uncertainty"
+        """
+        # Default implementation uses class name
+        class_name = self.__class__.__name__.replace('Acquisition', '').replace('Function', '').lower()
+        return f"{percentage}{class_name}"
 
 
 class RandomAcquisition(BaseAcquisitionFunction):

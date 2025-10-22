@@ -1,0 +1,70 @@
+# Test and Validation Dataset Configuration
+#
+# This file defines the types of test/validation datasets that can be generated
+# and various mixing strategies for combining them.
+
+# Dataset types with their generation parameters
+dataset_types:
+  no_shift:
+    description: "Original genomic sequences from the dataset"
+    source: "genomic"
+    oracle_labeled: false  # Uses original ground truth labels
+  
+  low_shift:
+    description: "Genomic sequences with 5% per-position mutation rate"
+    mutation_rate: 0.05
+    oracle_labeled: true  # Requires oracle labeling
+  
+  high_shift_low_activity:
+    description: "Completely random DNA sequences (typically low activity)"
+    oracle_labeled: true  # Requires oracle labeling
+
+# Predefined mixing strategies
+# Each strategy specifies proportions for different dataset types
+# Proportions should sum to 1.0 (or very close due to rounding)
+mixing_strategies:
+  # Pure strategies (100% single type)
+  genomic:
+    no_shift: 1.0
+  
+  low_shift_only:
+    low_shift: 1.0
+  
+  high_shift_only:
+    high_shift_low_activity: 1.0
+  
+  # Balanced strategies
+  balanced_shift:
+    no_shift: 0.33
+    low_shift: 0.33
+    high_shift_low_activity: 0.34
+  
+  # Genomic-heavy strategies
+  genomic_heavy:
+    no_shift: 0.7
+    low_shift: 0.2
+    high_shift_low_activity: 0.1
+  
+  genomic_with_low_shift:
+    no_shift: 0.8
+    low_shift: 0.2
+  
+  # Shift-heavy strategies
+  shift_heavy:
+    no_shift: 0.2
+    low_shift: 0.4
+    high_shift_low_activity: 0.4
+  
+  low_high_shift_only:
+    low_shift: 0.5
+    high_shift_low_activity: 0.5
+
+# Notes:
+# - Custom mixing strategies can be specified directly in config files
+# - Proportions will be used to sample from individual dataset files
+# - All mixed datasets will match the size of the genomic validation set
+# - New dataset types can be added by:
+#   1. Adding entry to dataset_types above
+#   2. Implementing generator in code/active_learning/dataset_generators.py
+#   3. Registering in DATASET_GENERATORS registry
+
