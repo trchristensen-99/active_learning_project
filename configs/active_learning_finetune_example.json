@@ -1,0 +1,59 @@
+{
+  "validation_dataset": "val_genomic",
+  "active_learning": {
+    "n_cycles": 5,
+    "n_candidates_per_cycle": 100000,
+    "n_acquire_per_cycle": 20000,
+    "training_strategy": "fine_tune",
+    "finetune_config": {
+      "learning_rate": {
+        "type": "fixed",
+        "value": 0.0001
+      },
+      "num_epochs": 50,
+      "replay_strategy": {
+        "type": "fixed_ratio",
+        "old_new_ratio": 1.0
+      },
+      "optimizer": {
+        "weight_decay": 1e-6
+      },
+      "early_stopping": {
+        "enabled": true,
+        "patience": 10
+      }
+    }
+  },
+  "data": {
+    "initial_data_path": "data/processed/train.txt",
+    "n_initial": 20000,
+    "dataset_name": "deepstarr",
+    "genomic_test_path": "data/processed/test.txt",
+    "genomic_val_path": "data/processed/val.txt"
+  },
+  "oracle": {
+    "composition": [
+      {"type": "dream_rnn", "count": 5, "model_dir": "models/dream_rnn_ensemble"}
+    ],
+    "device": "auto",
+    "batch_size": 1024
+  },
+  "trainer": {
+    "model_dir": "results/active_learning_finetune/student_model",
+    "training_type": "from_scratch",
+    "architecture": "deepstarr",
+    "num_epochs": 100,
+    "batch_size": 8192,
+    "lr": 0.001,
+    "weight_decay": 1e-6,
+    "n_workers": 4,
+    "enable_replay": false,
+    "early_stopping": true,
+    "early_stopping_patience": 10,
+    "lr_scheduler": "reduce_on_plateau",
+    "lr_factor": 0.2,
+    "lr_patience": 5
+  },
+  "proposal_strategy": {"type": "random", "seqsize": 249},
+  "acquisition_function": {"type": "random"}
+}

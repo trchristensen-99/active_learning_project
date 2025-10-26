@@ -52,6 +52,7 @@ class ConfigurationManager:
         self.n_candidates = config['active_learning']['n_candidates_per_cycle']
         self.n_acquire = config['active_learning']['n_acquire_per_cycle']
         self.round0_init = self._get_round0_init(config)
+        self.training_mode = self._get_training_mode(config)
         self.validation_dataset = self._get_validation_dataset(config)
         
         # Calculate deterministic seed from index
@@ -369,6 +370,60 @@ class ConfigurationManager:
         else:
             return "val_unknown"
     
+    def _get_training_mode(self, config: Dict[str, Any]) -> str:
+        """
+        Generate training mode string with all parameters encoded.
+        
+        Format: train_{mode} or finetune_{params}
+        
+        Examples:
+            - train_scratch (train from scratch each cycle)
+            - finetune_lr1e4_50ep_alldata (fixed LR, all data)
+            - finetune_lr1e4_50ep_ratio1p0 (fixed ratio replay)
+            - finetune_lrsch_red_50ep_20pct (scheduled LR, 20% replay)
+        """
+        strategy = config.get('active_learning', {}).get('training_strategy', 'from_scratch')
+        
+        if strategy == 'from_scratch':
+            return 'train_scratch'
+        elif strategy == 'fine_tune':
+            ft_cfg = config.get('active_learning', {}).get('finetune_config')
+            if not ft_cfg:
+                raise ValueError("fine_tune strategy requires finetune_config")
+            
+            parts = ['finetune']
+            
+            # LR configuration
+            lr_cfg = ft_cfg['learning_rate']
+            if lr_cfg['type'] == 'fixed':
+                lr_val = lr_cfg['value']
+                parts.append(f"lr{lr_val:.0e}".replace('e-0', 'e'))
+            else:  # scheduled
+                parts.append(f"lrsch_{lr_cfg['scheduler'][:3]}")
+            
+            # Epochs
+            parts.append(f"{ft_cfg['num_epochs']}ep")
+            
+            # Replay strategy
+            replay = ft_cfg['replay_strategy']
+            if replay['type'] == 'all_data':
+                parts.append('alldata')
+            elif replay['type'] == 'fixed_ratio':
+                ratio = replay['old_new_ratio']
+                parts.append(f"ratio{ratio:.1f}".replace('.', 'p'))
+            elif replay['type'] == 'percentage':
+                parts.append(f"{replay['percentage']}pct")
+            
+            # Optimizer params (if non-default)
+            opt = ft_cfg.get('optimizer', {})
+            if opt.get('weight_decay') != 1e-6:
+                wd = opt['weight_decay']
+                parts.append(f"wd{wd:.0e}".replace('e-0', 'e'))
+            
+            return '_'.join(parts)
+        else:
+            raise ValueError(f"Unknown training_strategy: {strategy}")
+    
     def get_run_directory(self) -> Path:
         """
         Generate hierarchical directory path for this configuration.
@@ -379,7 +434,7 @@ class ConfigurationManager:
         Example:
             results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/
             100random_acquisition/100000cand_20000acq/init_prop_genomic_acq_random_20k/
-            val_genomic/idx1/
+            train_scratch/val_genomic/idx1/
         """
         return Path('results') / \
                self.dataset / \
@@ -389,6 +444,7 @@ class ConfigurationManager:
                self.acquisition_strategy / \
                f"{self.n_candidates}cand_{self.n_acquire}acq" / \
                self.round0_init / \
+               self.training_mode / \
                self.validation_dataset / \
                f"idx{self.run_index}"
     

@@ -49,7 +49,8 @@ class ActiveLearningCycle:
         round0_acquisition_function: Optional[BaseAcquisitionFunction] = None,
         round0_n_candidates: Optional[int] = None,
         round0_n_acquire: Optional[int] = None,
-        test_datasets: Optional[Dict[str, Tuple[List[str], np.ndarray]]] = None
+        test_datasets: Optional[Dict[str, Tuple[List[str], np.ndarray]]] = None,
+        finetune_config: Optional[Dict] = None
     ):
         """
         Initialize active learning cycle.
@@ -67,6 +68,7 @@ class ActiveLearningCycle:
             n_acquire_per_cycle: Number of sequences to acquire per cycle
             training_strategy: Training strategy ("from_scratch" or "fine_tune")
             seed: Random seed for reproducibility
+            finetune_config: Configuration for fine-tuning parameters
         """
         self.oracle = oracle
         self.trainer = trainer
@@ -91,6 +93,7 @@ class ActiveLearningCycle:
         self.n_candidates_per_cycle = n_candidates_per_cycle
         self.n_acquire_per_cycle = n_acquire_per_cycle
         self.training_strategy = training_strategy
+        self.finetune_config = finetune_config
         
         # Set random seed
         np.random.seed(seed)
@@ -243,7 +246,8 @@ class ActiveLearningCycle:
             )
         else:  # fine_tune
             training_results = self.trainer.fine_tune(
-                train_sequences, train_labels
+                train_sequences, train_labels,
+                finetune_config=self.finetune_config
             )
         
         return training_results

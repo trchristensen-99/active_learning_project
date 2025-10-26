@@ -121,10 +121,57 @@ Experiments are configured via JSON files:
   "active_learning": {
     "n_cycles": 5,
     "n_candidates_per_cycle": 100000,
-    "n_acquire_per_cycle": 20000
+    "n_acquire_per_cycle": 20000,
+    "training_strategy": "from_scratch"
   }
 }
 ```
+
+### Fine-tuning Configuration
+
+For continual learning experiments, use the `fine_tune` training strategy with detailed configuration:
+
+```json
+{
+  "active_learning": {
+    "training_strategy": "fine_tune",
+    "finetune_config": {
+      "learning_rate": {
+        "type": "fixed",
+        "value": 0.0001
+      },
+      "num_epochs": 50,
+      "replay_strategy": {
+        "type": "fixed_ratio",
+        "old_new_ratio": 1.0
+      },
+      "optimizer": {
+        "weight_decay": 1e-6
+      },
+      "early_stopping": {
+        "enabled": true,
+        "patience": 10
+      }
+    }
+  }
+}
+```
+
+**Replay Strategies:**
+- `"all_data"`: Use all accumulated data (default behavior)
+- `"fixed_ratio"`: Sample old data based on ratio to new data (e.g., 1.0 = equal old:new)
+- `"percentage"`: Sample fixed % of old data (e.g., 20 = 20% of old data)
+
+**Learning Rate Options:**
+- `"fixed"`: Use constant learning rate for all epochs
+- `"scheduled"`: Use learning rate scheduler (e.g., ReduceLROnPlateau)
+
+**Directory Naming:**
+Fine-tuning configurations are encoded in directory names:
+- `train_scratch` - Train from scratch each cycle
+- `finetune_lr1e4_50ep_alldata` - Fixed LR, all data replay
+- `finetune_lr1e4_50ep_ratio1p0` - Fixed ratio replay (1:1 old:new)
+- `finetune_lrsch_red_50ep_20pct` - Scheduled LR, 20% replay
 
 ## Common Commands
 

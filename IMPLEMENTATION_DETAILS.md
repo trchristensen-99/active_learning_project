@@ -354,7 +354,7 @@ experiments:
 
 ### Hierarchy (v2)
 
-Results are organized in a 9-level hierarchy:
+Results are organized in a 10-level hierarchy:
 
 ```
 results/
@@ -365,17 +365,18 @@ results/
           {acquisition_strategy}/         # 5. Acquisition method
             {n_cand}cand_{n_acq}acq/      # 6. Pool sizes
               {round0_init}/              # 7. Initialization
-                {validation_dataset}/     # 8. Validation set
-                  idx{run_index}/         # 9. Run index
-                    config.json
-                    metadata.json
-                    summary.json
-                    round_000/
-                      model_best.pth
-                      metrics.json
-                      training_data.json
-                    round_001/
-                      ...
+                {training_mode}/           # 8. Training mode
+                  {validation_dataset}/   # 9. Validation set
+                    idx{run_index}/       # 10. Run index
+                      config.json
+                      metadata.json
+                      summary.json
+                      round_000/
+                        model_best.pth
+                        metrics.json
+                        training_data.json
+                      round_001/
+                        ...
 ```
 
 ### Level Details
@@ -441,13 +442,46 @@ results/
 - `init_prop_random_acq_uncertainty_10k`
 - `init_prop_genomic_random_acq_random_genomic10k_random10k`
 
-#### Level 8: Validation Dataset (`{validation_dataset}`)
+#### Level 8: Training Mode (`{training_mode}`)
+**Format:** `train_{mode}` or `finetune_{params}`  
+**Examples:**
+- `train_scratch` - Train from scratch each cycle
+- `finetune_lr1e4_50ep_alldata` - Fixed LR, all data replay
+- `finetune_lr1e4_50ep_ratio1p0` - Fixed ratio replay (1:1 old:new)
+- `finetune_lrsch_red_50ep_20pct` - Scheduled LR, 20% replay
+
+**Configuration:**
+```json
+{
+  "active_learning": {
+    "training_strategy": "fine_tune",
+    "finetune_config": {
+      "learning_rate": {"type": "fixed", "value": 0.0001},
+      "num_epochs": 50,
+      "replay_strategy": {"type": "fixed_ratio", "old_new_ratio": 1.0},
+      "optimizer": {"weight_decay": 1e-6},
+      "early_stopping": {"enabled": true, "patience": 10}
+    }
+  }
+}
+```
+
+**Parameter Encoding:**
+- `lr{value}` - Fixed learning rate (e.g., `lr1e4` for 0.0001)
+- `lrsch_{scheduler}` - Scheduled learning rate (e.g., `lrsch_red` for ReduceLROnPlateau)
+- `{epochs}ep` - Number of epochs (e.g., `50ep`)
+- `alldata` - Use all accumulated data
+- `ratio{ratio}` - Fixed ratio replay (e.g., `ratio1p0` for 1.0)
+- `{percentage}pct` - Percentage replay (e.g., `20pct` for 20%)
+- `wd{value}` - Weight decay (if non-default, e.g., `wd1e5` for 1e-5)
+
+#### Level 9: Validation Dataset (`{validation_dataset}`)
 **Format:** `val_{name}` or `val_{pct1}{type1}_{pct2}{type2}*`  
 **Examples:**
 - `val_genomic`
 - `val_33highshiftlowactivity_33lowshift_34noshift` (alphabetical)
 
-#### Level 9: Run Index (`idx{run_index}`)
+#### Level 10: Run Index (`idx{run_index}`)
 **Format:** `idx{N}`  
 **Seed:** `42 + N * 1000`  
 **Examples:** `idx0` (seed=42), `idx1` (seed=1042), `idx2` (seed=2042)
@@ -457,7 +491,9 @@ results/
 ```
 results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/
   100random_acquisition/100000cand_20000acq/
-  init_prop_genomic_acq_random_20k/val_genomic/idx1/
+  init_prop_genomic_acq_random_20k/
+    train_scratch/val_genomic/idx1/
+    finetune_lr1e4_50ep_ratio1p0/val_genomic/idx2/
 ```
 
 **Interpretation:**
@@ -468,8 +504,9 @@ results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/
 - Acquisition: 100% random selection
 - Pool: 100k candidates → 20k acquired per cycle
 - Round 0: 20k genomic sequences, randomly selected
+- Training: `train_scratch` (from scratch) vs `finetune_lr1e4_50ep_ratio1p0` (fine-tune with 1:1 replay)
 - Validation: Genomic validation set
-- Run: Index 1 (seed = 1042)
+- Run: Index 1 (seed = 1042) vs Index 2 (seed = 2042)
 
 ### Querying Results
 

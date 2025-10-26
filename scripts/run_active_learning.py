@@ -437,7 +437,8 @@ def main():
         round0_acquisition_function=round0_acquisition_function,
         round0_n_candidates=round0_n_candidates,
         round0_n_acquire=round0_n_acquire,
-        test_datasets=test_datasets
+        test_datasets=test_datasets,
+        finetune_config=config['active_learning'].get('finetune_config')
     )
     
     # Run active learning (will auto-resume if checkpoints exist)

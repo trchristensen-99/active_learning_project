@@ -67,7 +67,8 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         early_stopping_patience: int = 10,
         lr_scheduler: str = "reduce_on_plateau",
         lr_factor: float = 0.2,
-        lr_patience: int = 5
+        lr_patience: int = 5,
+        finetune_config: Optional[Dict] = None
     ):
         """
         Initialize DeepSTARR active learning trainer.
@@ -83,6 +84,7 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
             n_workers: Number of data loading workers
             enable_replay: Whether to use replay buffer for continual learning
             replay_buffer_size: Size of replay buffer
+            finetune_config: Configuration for fine-tuning parameters
         """
         self.model_dir = Path(model_dir)
         self.model_dir.mkdir(parents=True, exist_ok=True)
@@ -112,6 +114,9 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         self.lr_scheduler = lr_scheduler
         self.lr_factor = lr_factor
         self.lr_patience = lr_patience
+        
+        # Fine-tuning configuration
+        self.finetune_config = finetune_config
         
         # Model and trainer
         self.model = None
@@ -254,35 +259,96 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         self,
         new_sequences: List[str],
         new_labels: np.ndarray,
+        finetune_config: Optional[Dict] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Fine-tune existing model with new data.
+        Fine-tune existing model with new data using configurable parameters.
         
         Args:
             new_sequences: New sequences to add
             new_labels: New labels
-            **kwargs: Additional training parameters
+            finetune_config: Fine-tuning configuration dictionary
+            **kwargs: Additional training parameters (for backward compatibility)
             
         Returns:
             Training results dictionary
         """
         print("Fine-tuning DeepSTARR model...")
         
+        # Use provided config or fall back to self.finetune_config
+        config = finetune_config or self.finetune_config
+        if config is None:
+            raise ValueError("Fine-tuning requires finetune_config")
+        
         # Load existing model
         self.model = self._load_model()
         if self.model is None:
             raise ValueError("No existing model found for fine-tuning")
         
-        # Prepare training data
-        if self.enable_replay and self.replay_buffer:
-            # Combine new data with replay buffer
-            replay_sequences, replay_labels = zip(*self.replay_buffer)
-            all_sequences = list(replay_sequences) + new_sequences
-            all_labels = np.vstack([np.array(replay_labels), new_labels])
+        # Parse configuration
+        lr_config = config['learning_rate']
+        num_epochs = config['num_epochs']
+        replay_config = config['replay_strategy']
+        optimizer_config = config.get('optimizer', {})
+        early_stopping_config = config.get('early_stopping', {})
+        
+        # Prepare training data based on replay strategy
+        if replay_config['type'] == 'all_data':
+            # Use all accumulated data (current behavior)
+            if self.enable_replay and self.replay_buffer:
+                replay_sequences, replay_labels = zip(*self.replay_buffer)
+                all_sequences = list(replay_sequences) + new_sequences
+                all_labels = np.vstack([np.array(replay_labels), new_labels])
+            else:
+                all_sequences = new_sequences
+                all_labels = new_labels
+                
+        elif replay_config['type'] == 'fixed_ratio':
+            # Sample old data based on ratio to new data
+            ratio = replay_config['old_new_ratio']
+            if self.enable_replay and self.replay_buffer:
+                replay_sequences, replay_labels = zip(*self.replay_buffer)
+                n_old_samples = int(len(new_sequences) * ratio)
+                if n_old_samples > 0:
+                    # Sample randomly from replay buffer
+                    old_indices = np.random.choice(len(replay_sequences), 
+                                                min(n_old_samples, len(replay_sequences)), 
+                                                replace=False)
+                    old_sequences = [replay_sequences[i] for i in old_indices]
+                    old_labels = np.array([replay_labels[i] for i in old_indices])
+                    all_sequences = old_sequences + new_sequences
+                    all_labels = np.vstack([old_labels, new_labels])
+                else:
+                    all_sequences = new_sequences
+                    all_labels = new_labels
+            else:
+                all_sequences = new_sequences
+                all_labels = new_labels
+                
+        elif replay_config['type'] == 'percentage':
+            # Sample fixed % of old data
+            percentage = replay_config['percentage']
+            if self.enable_replay and self.replay_buffer:
+                replay_sequences, replay_labels = zip(*self.replay_buffer)
+                n_old_samples = int(len(replay_sequences) * percentage / 100)
+                if n_old_samples > 0:
+                    # Sample randomly from replay buffer
+                    old_indices = np.random.choice(len(replay_sequences), 
+                                                min(n_old_samples, len(replay_sequences)), 
+                                                replace=False)
+                    old_sequences = [replay_sequences[i] for i in old_indices]
+                    old_labels = np.array([replay_labels[i] for i in old_indices])
+                    all_sequences = old_sequences + new_sequences
+                    all_labels = np.vstack([old_labels, new_labels])
+                else:
+                    all_sequences = new_sequences
+                    all_labels = new_labels
+            else:
+                all_sequences = new_sequences
+                all_labels = new_labels
         else:
-            all_sequences = new_sequences
-            all_labels = new_labels
+            raise ValueError(f"Unknown replay strategy: {replay_config['type']}")
         
         # Use external validation data if set, otherwise split train/val
         if self.validation_sequences is not None and self.validation_labels is not None:
@@ -308,10 +374,25 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         train_data_path = self.model_dir / "temp_finetune_train.tsv"
         self._save_data_to_tsv(train_sequences, train_labels, str(train_data_path))
         
-        # Create trainer with lower learning rate for fine-tuning
-        finetune_lr = kwargs.get('finetune_lr', self.lr * 0.1)
-        finetune_epochs = kwargs.get('finetune_epochs', self.num_epochs // 2)
+        # Configure learning rate
+        if lr_config['type'] == 'fixed':
+            finetune_lr = lr_config['value']
+            lr_scheduler = None
+            lr_factor = None
+            lr_patience = None
+        elif lr_config['type'] == 'scheduled':
+            finetune_lr = lr_config['initial_value']
+            lr_scheduler = lr_config['scheduler']
+            lr_factor = lr_config['factor']
+            lr_patience = lr_config['patience']
+        else:
+            raise ValueError(f"Unknown learning rate type: {lr_config['type']}")
         
+        # Configure early stopping
+        early_stopping = early_stopping_config.get('enabled', True)
+        early_stopping_patience = early_stopping_config.get('patience', 10)
+        
+        # Create trainer with configured parameters
         self.trainer = DeepSTARRTrainer(
             model=self.model,
             device=self.device,
@@ -319,16 +400,16 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
             train_data_path=str(train_data_path),
             val_sequences=val_seqs,
             val_labels=val_labs,
-            num_epochs=finetune_epochs,
+            num_epochs=num_epochs,
             lr=finetune_lr,
-            weight_decay=self.weight_decay,
+            weight_decay=optimizer_config.get('weight_decay', self.weight_decay),
             batch_size=self.batch_size,
             n_workers=self.n_workers,
-            early_stopping=self.early_stopping,
-            early_stopping_patience=self.early_stopping_patience,
-            lr_scheduler=self.lr_scheduler,
-            lr_factor=self.lr_factor,
-            lr_patience=self.lr_patience
+            early_stopping=early_stopping,
+            early_stopping_patience=early_stopping_patience,
+            lr_scheduler=lr_scheduler,
+            lr_factor=lr_factor,
+            lr_patience=lr_patience
         )
         
         # Fine-tune model
