@@ -1,0 +1,33 @@
+{
+  "results_dir": "results/deepstarr",
+  "compare_variable": "n_acquire_per_cycle",
+  "compare_values": [
+    10000,
+    20000
+  ],
+  "hold_constant": {
+    "oracle_composition": "5dreamrnn",
+    "student_composition": "1deepstarr",
+    "proposal_strategy": "100random_proposal",
+    "acquisition_strategy": "100random_acquisition",
+    "n_candidates_per_cycle": 100000,
+    "round0_init": "init_prop_genomic_acq_random_20k",
+    "training_mode": "train_scratch",
+    "validation_dataset": "val_genomic"
+  },
+  "metrics": [
+    "avg_correlation",
+    "total_mse"
+  ],
+  "test_sets": null,
+  "figure_size": [
+    8.0,
+    6.0
+  ],
+  "font_size": 12,
+  "plot_format": "png",
+  "n_experiments_total": 6,
+  "n_experiments_filtered": 6,
+  "n_groups": 2,
+  "timestamp": "2025-10-26T15:18:15.442708"
+}

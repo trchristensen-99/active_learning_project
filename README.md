@@ -225,6 +225,54 @@ Models are automatically evaluated on three test sets:
 
 This enables robust assessment of model generalization across distribution shifts.
 
+## Results Analysis
+
+The framework includes a comprehensive analysis system for comparing experiment configurations and generating publication-ready visualizations.
+
+### Quick Analysis
+
+```bash
+# Compare acquisition sizes (10k vs 20k)
+python scripts/analyze_results.py \
+  --results-dir results/deepstarr \
+  --compare-variable n_acquire_per_cycle \
+  --compare-values 10000,20000 \
+  --hold-constant oracle_composition=5dreamrnn,student_composition=1deepstarr \
+  --output-dir analysis_output/acquisition_comparison
+
+# Compare training strategies
+python scripts/analyze_results.py \
+  --results-dir results/deepstarr \
+  --compare-variable training_mode \
+  --compare-values train_scratch,finetune_lr1e4_50ep_ratio1p0 \
+  --hold-constant n_acquire_per_cycle=20000 \
+  --output-dir analysis_output/training_comparison
+```
+
+### Analysis Features
+
+- **Flexible Comparisons**: Compare any variable while holding others constant
+- **Statistical Rigor**: Proper aggregation with mean/std/sem/95% CI using t-distribution
+- **Publication-Ready Plots**: Clean matplotlib plots with 95% confidence intervals
+- **Data Export**: CSV files for custom analysis and summary tables
+- **Reproducible**: Analysis configuration saved with outputs
+
+### Output Structure
+
+```
+analysis_output/
+  plots/                    # Publication-ready plots
+    no_shift_avg_correlation.png
+    combined_total_mse.png
+    ...
+  data/                     # Exported data
+    aggregated_metrics.csv   # Statistics by cycle
+    summary_table.md        # Final performance summary
+    raw_data.csv           # Complete raw data
+  config.json              # Analysis configuration
+  README.md                # Results interpretation
+```
+
 ## Available Experiments
 
 ### Genomic Initialization

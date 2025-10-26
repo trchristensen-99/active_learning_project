@@ -13,10 +13,11 @@ This is the comprehensive technical documentation for the active learning framew
 5. [Checkpointing and Reproducibility](#checkpointing-and-reproducibility)
 6. [Running Experiments](#running-experiments)
 7. [Multi-Test Evaluation System](#multi-test-evaluation-system)
-8. [Oracle and Student Ensembles](#oracle-and-student-ensembles)
-9. [Extending the Framework](#extending-the-framework)
-10. [Troubleshooting](#troubleshooting)
-11. [API Reference](#api-reference)
+8. [Results Analysis and Plotting](#results-analysis-and-plotting)
+9. [Oracle and Student Ensembles](#oracle-and-student-ensembles)
+10. [Extending the Framework](#extending-the-framework)
+11. [Troubleshooting](#troubleshooting)
+12. [API Reference](#api-reference)
 
 ---
 
@@ -908,6 +909,204 @@ dataset_types:
 ```
 
 **4. Regenerate:** Delete `data/test_val_sets/{dataset}/` and rerun.
+
+---
+
+## Results Analysis and Plotting
+
+The framework includes a comprehensive analysis system (`code/plotting/`) for comparing experiment configurations and generating publication-ready visualizations.
+
+### Architecture
+
+The analysis system consists of four main components:
+
+1. **`ResultsParser`** (`results_parser.py`): Parses the 10-level directory hierarchy and loads `all_cycle_results.json` files
+2. **`MetricsAggregator`** (`results_aggregator.py`): Aggregates metrics across replicates with proper statistics
+3. **`ResultsPlotter`** (`plotter.py`): Generates publication-ready matplotlib plots with 95% CI shaded regions
+4. **`ResultsExporter`** (`exporter.py`): Exports CSV data and summary tables
+
+### Usage
+
+#### Basic Analysis
+
+```bash
+python scripts/analyze_results.py \
+  --results-dir results/deepstarr \
+  --compare-variable n_acquire_per_cycle \
+  --compare-values 10000,20000 \
+  --hold-constant oracle_composition=5dreamrnn,student_composition=1deepstarr \
+  --output-dir analysis_output/acquisition_comparison
+```
+
+#### Advanced Options
+
+```bash
+python scripts/analyze_results.py \
+  --results-dir results/deepstarr \
+  --compare-variable training_mode \
+  --compare-values train_scratch,finetune_lr1e4_50ep_ratio1p0 \
+  --hold-constant n_acquire_per_cycle=20000 \
+  --metrics avg_correlation,total_mse,dev_correlation \
+  --test-sets no_shift,low_shift \
+  --figure-size 10,8 \
+  --font-size 14 \
+  --plot-format pdf \
+  --output-dir analysis_output/training_comparison
+```
+
+### Command Line Arguments
+
+#### Required Arguments
+- `--results-dir`: Root results directory (e.g., `results/deepstarr`)
+- `--compare-variable`: Variable to compare (e.g., `n_acquire_per_cycle`, `training_mode`)
+- `--compare-values`: Values to compare (comma-separated, e.g., `10000,20000`)
+
+#### Optional Arguments
+- `--hold-constant`: Variables to hold constant (format: `var1=val1,var2=val2`)
+- `--metrics`: Metrics to plot (comma-separated, default: `avg_correlation,total_mse`)
+- `--test-sets`: Test sets to include (comma-separated, default: all available)
+- `--output-dir`: Output directory for plots/CSVs (default: `analysis_output/`)
+- `--plot-format`: Plot format (`png`, `pdf`, `svg`, default: `png`)
+- `--figure-size`: Figure size as width,height (default: `8,6`)
+- `--font-size`: Font size (default: `12`)
+- `--no-plots`: Skip plot generation
+- `--no-csv`: Skip CSV export
+
+### Data Structure
+
+#### Input Data
+The system automatically parses the hierarchical directory structure:
+```
+results/{dataset}/{oracle_composition}/{student_composition}/
+  {proposal_strategy}/{acquisition_strategy}/{pool_sizes}/
+  {round0_init}/{training_mode}/{validation_dataset}/idx{N}/
+    all_cycle_results.json
+```
+
+#### Output Structure
+```
+analysis_output/
+  plots/                    # Publication-ready plots
+    {test_set}_{metric}.png      # Individual test set plots
+    combined_{metric}.png         # Combined test set plots
+  data/                     # Exported data
+    aggregated_metrics.csv        # Statistics by cycle
+    summary_table.md            # Final performance summary
+    raw_data.csv               # Complete raw data
+  config.json               # Analysis configuration
+  README.md                 # Results interpretation
+```
+
+### Statistical Methods
+
+#### Aggregation
+- **Mean**: Arithmetic mean across replicates
+- **Standard Deviation**: Sample standard deviation (ddof=1)
+- **Standard Error**: SEM = std / sqrt(n)
+- **95% Confidence Interval**: Using t-distribution with n-1 degrees of freedom
+- **Min/Max**: Range across replicates
+
+#### Plot Features
+- **Line plots**: Mean values with markers
+- **Confidence intervals**: 95% CI as shaded regions
+- **Color scheme**: Colorblind-friendly palette
+- **Grid**: Subtle grid for readability
+- **Legends**: Clear variable labeling
+
+### Available Variables
+
+The system can compare any variable from the directory hierarchy:
+
+#### Numeric Variables
+- `n_candidates_per_cycle`: Candidate pool size
+- `n_acquire_per_cycle`: Acquisition size
+- `run_index`: Replicate number
+
+#### Categorical Variables
+- `dataset`: Dataset name (e.g., `deepstarr`)
+- `oracle_composition`: Oracle ensemble (e.g., `5dreamrnn`)
+- `student_composition`: Student model (e.g., `1deepstarr`)
+- `proposal_strategy`: Proposal method (e.g., `100random_proposal`)
+- `acquisition_strategy`: Acquisition method (e.g., `100random_acquisition`)
+- `round0_init`: Initialization strategy
+- `training_mode`: Training strategy (e.g., `train_scratch`, `finetune_lr1e4_50ep_ratio1p0`)
+- `validation_dataset`: Validation set (e.g., `val_genomic`)
+
+### Available Metrics
+
+Common metrics available for analysis:
+- `avg_correlation`: Average correlation across output heads
+- `dev_correlation`: Developmental activity correlation
+- `hk_correlation`: Housekeeping activity correlation
+- `total_mse`: Total mean squared error
+- `dev_mse`: Developmental activity MSE
+- `hk_mse`: Housekeeping activity MSE
+- `n_test_samples`: Number of test samples
+
+### Example Analyses
+
+#### 1. Acquisition Size Comparison
+```bash
+python scripts/analyze_results.py \
+  --results-dir results/deepstarr \
+  --compare-variable n_acquire_per_cycle \
+  --compare-values 10000,20000 \
+  --hold-constant oracle_composition=5dreamrnn,student_composition=1deepstarr \
+  --output-dir analysis_output/acquisition_comparison
+```
+
+#### 2. Training Strategy Comparison
+```bash
+python scripts/analyze_results.py \
+  --results-dir results/deepstarr \
+  --compare-variable training_mode \
+  --compare-values train_scratch,finetune_lr1e4_50ep_ratio1p0 \
+  --hold-constant n_acquire_per_cycle=20000 \
+  --output-dir analysis_output/training_comparison
+```
+
+#### 3. Oracle Composition Comparison
+```bash
+python scripts/analyze_results.py \
+  --results-dir results/deepstarr \
+  --compare-variable oracle_composition \
+  --compare-values 5dreamrnn,3deepstarr+5dreamrnn \
+  --hold-constant n_acquire_per_cycle=20000,training_mode=train_scratch \
+  --output-dir analysis_output/oracle_comparison
+```
+
+### Customization
+
+#### Plot Styling
+The `ResultsPlotter` class supports customization:
+```python
+plotter = ResultsPlotter(
+    figure_size=(10, 8),    # Width, height in inches
+    font_size=14,           # Font size
+    dpi=300                 # Resolution
+)
+```
+
+#### Statistical Parameters
+The `MetricsAggregator` supports different confidence levels:
+```python
+aggregator = MetricsAggregator(confidence_level=0.95)  # 95% CI
+```
+
+### Error Handling
+
+The system gracefully handles:
+- **Missing experiments**: Warns about missing values
+- **Incomplete cycles**: Plots available data only
+- **Missing metrics**: Skips unavailable metrics
+- **Invalid configurations**: Clear error messages
+
+### Performance
+
+- **Automatic detection**: Finds all experiments without manual specification
+- **Efficient parsing**: Loads only required data
+- **Memory management**: Processes experiments in batches
+- **Parallel plotting**: Generates multiple plots efficiently
 
 ---
 
