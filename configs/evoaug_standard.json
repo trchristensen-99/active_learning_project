@@ -1,0 +1,34 @@
+{
+  "enabled": true,
+  "augmentations": {
+    "mutation": {
+      "enabled": true,
+      "mutate_frac": 0.1
+    },
+    "translocation": {
+      "enabled": true,
+      "shift_min": 0,
+      "shift_max": 30
+    },
+    "deletion": {
+      "enabled": true,
+      "delete_min": 0,
+      "delete_max": 15
+    },
+    "insertion": {
+      "enabled": false
+    },
+    "inversion": {
+      "enabled": false
+    },
+    "reverse_complement": {
+      "enabled": false
+    },
+    "noise": {
+      "enabled": false
+    }
+  },
+  "max_augs_per_sequence": 2,
+  "mode": "hard"
+}
+

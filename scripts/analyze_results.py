@@ -64,6 +64,80 @@ def parse_compare_values(compare_values_str: str) -> List[Any]:
     return values
 
 
+def _extract_all_variables(collection) -> Dict[str, Any]:
+    """
+    Extract all configuration variables from the experiments.
+    Returns a dict of {variable_name: value} for variables that are constant
+    across all experiments in the collection.
+    """
+    if len(collection) == 0:
+        return {}
+    
+    # Get all variable names from first experiment
+    all_var_names = [
+        'dataset', 'oracle_composition', 'student_composition',
+        'proposal_strategy', 'acquisition_strategy', 
+        'n_candidates_per_cycle', 'n_acquire_per_cycle',
+        'round0_init', 'training_mode', 'validation_dataset', 'data_source'
+    ]
+    
+    # Check which variables have the same value across all experiments
+    constant_vars = {}
+    for var_name in all_var_names:
+        values = set(getattr(exp, var_name) for exp in collection)
+        if len(values) == 1:
+            constant_vars[var_name] = values.pop()
+    
+    return constant_vars
+
+
+def _shorten_value(key: str, value: Any) -> str:
+    """Shorten common long configuration values for directory names."""
+    value_str = str(value)
+    
+    # Shorten common patterns
+    shortenings = {
+        'oracle_composition': {
+            '5dreamrnn': '5drnn',
+            '3dreamrnn': '3drnn',
+        },
+        'student_composition': {
+            '1deepstarr_bs128_lr2': '1ds_bs128',
+            '1deepstarr_bs128_lr0p002': '1ds_bs128',
+            '1deepstarr_bs32_lr1': '1ds_bs32',
+        },
+        'proposal_strategy': {
+            '100random_proposal': 'rand',
+            '100uncertainty_proposal': 'unc',
+        },
+        'acquisition_strategy': {
+            '100random_acquisition': 'rand',
+            '100uncertainty_acquisition': 'unc',
+        },
+        'round0_init': {
+            'init_prop_genomic_acq_random_20k': 'gen20k',
+            'init_prop_random_acq_random_20k': 'rand20k',
+        },
+        'training_mode': {
+            'train_scratch': 'scratch',
+            'finetune_lr1e4_50ep_ratio1p0': 'ft_ratio1',
+        },
+        'validation_dataset': {
+            'val_genomic': 'gen',
+            'val_random': 'rand',
+        },
+        'data_source': {
+            'ground_truth': 'gt',
+            'oracle_labels': 'oracl',
+        }
+    }
+    
+    if key in shortenings and value_str in shortenings[key]:
+        return shortenings[key][value_str]
+    
+    return value_str
+
+
 def main():
     """Main analysis function."""
     parser = argparse.ArgumentParser(description='Analyze experiment results')
@@ -79,11 +153,11 @@ def main():
     # Optional arguments
     parser.add_argument('--hold-constant', type=str, default='',
                        help='Variables to hold constant (format: var1=val1,var2=val2)')
-    parser.add_argument('--metrics', type=str, default='avg_correlation,total_mse',
+    parser.add_argument('--metrics', type=str, default='dev_correlation,hk_correlation,avg_correlation,total_mse,dev_mse,hk_mse,avg_mse',
                        help='Metrics to plot (comma-separated)')
     parser.add_argument('--test-sets', type=str, default='',
                        help='Test sets to include (comma-separated, default: all)')
-    parser.add_argument('--output-dir', type=str, default='analysis_output/',
+    parser.add_argument('--output-dir', type=str, default='results_analysis/',
                        help='Output directory for plots/CSVs')
     parser.add_argument('--plot-format', type=str, default='png',
                        choices=['png', 'pdf', 'svg'],
@@ -176,14 +250,49 @@ def main():
     plots_dir.mkdir(exist_ok=True)
     data_dir.mkdir(exist_ok=True)
     
+    # Create signature strings for hierarchical organization
+    values_sig = f"{args.compare_variable}={'_'.join(map(str, compare_values))}"
+    
+    # Extract all constant variables from the filtered experiments
+    all_constants = _extract_all_variables(filtered_collection)
+    
+    # Override with user-specified constants (for verification/filtering)
+    if hold_constant:
+        # Verify user-specified constants match actual data
+        for key, user_value in hold_constant.items():
+            if key in all_constants and all_constants[key] != user_value:
+                print(f"Warning: User specified {key}={user_value} but data has {all_constants[key]}")
+    
+    # Create constants signature from all non-compared variables
+    constants_vars = {k: v for k, v in all_constants.items() 
+                      if k != args.compare_variable and k != 'run_index'}
+    
+    constants_parts = []
+    for key in sorted(constants_vars.keys()):
+        value = constants_vars[key]
+        short_value = _shorten_value(key, value)
+        constants_parts.append(f"{key}={short_value}")
+    
+    constants_sig = '_'.join(constants_parts) if constants_parts else 'all'
+    
+    print(f"Constants signature: {constants_sig}")
+    
     # Initialize components
     aggregator = MetricsAggregator()
     plotter = ResultsPlotter(figure_size=figure_size, font_size=args.font_size)
     exporter = ResultsExporter()
     
+    # Get available test sets from the experiments
+    available_test_sets = set()
+    if len(filtered_collection) > 0:
+        available_test_sets = list(filtered_collection)[0].get_available_test_sets()
+    
+    # Use specified test sets or all available ones
+    test_sets_to_use = test_sets if test_sets else available_test_sets
+    
     # Aggregate data for each group
     aggregated_data = {}
-    for test_set in ['no_shift', 'low_shift', 'high_shift_low_activity']:  # Default test sets
+    for test_set in test_sets_to_use:
         aggregated_data[test_set] = {}
         for metric in metrics:
             aggregated_data[test_set][metric] = {}
@@ -199,17 +308,13 @@ def main():
                 if test_set in group_aggregated and metric in group_aggregated[test_set]:
                     aggregated_data[test_set][metric][value] = group_aggregated[test_set][metric]
     
-    # Filter test sets if specified
-    if test_sets:
-        aggregated_data = {k: v for k, v in aggregated_data.items() if k in test_sets}
-    
     # Generate plots
     if not args.no_plots:
         print("Generating plots...")
         try:
             plot_paths = plotter.plot_all_metrics(
                 aggregated_data, plots_dir, args.compare_variable, compare_values,
-                metrics, args.plot_format
+                metrics, args.plot_format, values_sig, constants_sig
             )
             print(f"Generated {len(plot_paths)} plots")
         except Exception as e:
@@ -221,23 +326,27 @@ def main():
     if not args.no_csv:
         print("Exporting CSV data...")
         try:
+            # Create structured data subdirectory
+            structured_data_dir = data_dir / values_sig / constants_sig
+            structured_data_dir.mkdir(parents=True, exist_ok=True)
+            
             # Export aggregated data
             csv_path = exporter.export_to_csv(
-                aggregated_data, data_dir / "aggregated_metrics.csv",
+                aggregated_data, structured_data_dir / "aggregated_metrics.csv",
                 args.compare_variable, compare_values
             )
             print(f"Exported aggregated data to: {csv_path}")
             
             # Export summary table
             summary_path = exporter.export_summary_table(
-                aggregated_data, data_dir / "summary_table.md",
+                aggregated_data, structured_data_dir / "summary_table.md",
                 args.compare_variable, compare_values
             )
             print(f"Exported summary table to: {summary_path}")
             
             # Export raw data
             raw_path = exporter.export_raw_data(
-                list(filtered_collection), data_dir / "raw_data.csv"
+                list(filtered_collection), structured_data_dir / "raw_data.csv"
             )
             print(f"Exported raw data to: {raw_path}")
             

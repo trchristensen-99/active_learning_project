@@ -28,15 +28,61 @@ python scripts/run_experiments.py \
 python scripts/run_experiments.py --show-gpus
 ```
 
-### 3. Reproduce with DVC
+### 3. Train Oracle Ensemble
+
+Train a DREAM-RNN ensemble to serve as the oracle:
 
 ```bash
-# Complete pipeline from scratch
-dvc repro download_data
-dvc repro preprocess_deepstarr
+# Standard training
 dvc repro train_dream_rnn_ensemble
-dvc repro generate_test_val_datasets_deepstarr
 
+# Or manually with parallel training
+python scripts/train_ensemble.py \
+  --model_type dream_rnn \
+  --train_data data/processed/train.txt \
+  --val_data data/processed/val.txt \
+  --test_data data/processed/test.txt \
+  --output_dir models/oracles/deepstarr/dream_rnn \
+  --n_models 5 \
+  --epochs 80 \
+  --batch_size 1024 \
+  --lr 0.005 \
+  --parallel
+
+# With EvoAug augmentations
+python scripts/train_ensemble.py \
+  --model_type dream_rnn \
+  --train_data data/processed/train.txt \
+  --val_data data/processed/val.txt \
+  --test_data data/processed/test.txt \
+  --output_dir models/oracles/deepstarr/dream_rnn \
+  --n_models 5 \
+  --evoaug-config configs/evoaug_standard.json \
+  --parallel
+```
+
+**Oracle Directory Structure:**
+```
+models/oracles/
+  {dataset}/
+    {architecture}/           # Standard models
+      model_0/
+      ...
+    {architecture}/
+      {evoaug_sig}/          # EvoAug-trained models
+        model_0/
+        ...
+```
+
+### 4. Generate Test/Validation Datasets
+
+```bash
+dvc repro generate_test_val_datasets_deepstarr
+```
+
+### 5. Run Active Learning Experiments
+
+```bash
 # Run specific experiments
 dvc repro active_learning_genomic_init_20k_batch
 dvc repro active_learning_genomic_init_10k_batch
@@ -90,7 +136,12 @@ results/
 ```
 results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/
   100random_acquisition/100000cand_20000acq/
-  init_prop_genomic_acq_random_20k/val_genomic/idx1/
+  init_prop_genomic_acq_random_20k/train_scratch/val_genomic/ground_truth/idx1/
+
+# Oracle-labeled experiments use:
+results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/
+  100random_acquisition/100000cand_20000acq/
+  init_prop_genomic_acq_random_20k/train_scratch/val_genomic/oracle_labels/idx1/
 ```
 
 **Key improvements in v2:**
@@ -99,6 +150,7 @@ results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/
 - Strategy percentages (`100random_proposal`, not `random_proposal`)
 - Detailed initialization (`init_prop_genomic_acq_random_20k`, not `init_genomic`)
 - Clear validation dataset (`val_genomic`, not `genomic`)
+- Data source distinction (`ground_truth` vs `oracle_labels`)
 
 ## Configuration
 
@@ -115,7 +167,7 @@ Experiments are configured via JSON files:
   },
   "oracle": {
     "composition": [
-      {"type": "dream_rnn", "count": 5, "model_dir": "models/dream_rnn_ensemble"}
+      {"type": "dream_rnn", "count": 5, "model_dir": "models/oracles/deepstarr/dream_rnn"}
     ]
   },
   "active_learning": {
@@ -237,16 +289,14 @@ python scripts/analyze_results.py \
   --results-dir results/deepstarr \
   --compare-variable n_acquire_per_cycle \
   --compare-values 10000,20000 \
-  --hold-constant oracle_composition=5dreamrnn,student_composition=1deepstarr \
-  --output-dir analysis_output/acquisition_comparison
+  --hold-constant oracle_composition=5dreamrnn,student_composition=1deepstarr
 
 # Compare training strategies
 python scripts/analyze_results.py \
   --results-dir results/deepstarr \
   --compare-variable training_mode \
   --compare-values train_scratch,finetune_lr1e4_50ep_ratio1p0 \
-  --hold-constant n_acquire_per_cycle=20000 \
-  --output-dir analysis_output/training_comparison
+  --hold-constant n_acquire_per_cycle=20000
 ```
 
 ### Analysis Features
@@ -260,18 +310,77 @@ python scripts/analyze_results.py \
 ### Output Structure
 
 ```
-analysis_output/
-  plots/                    # Publication-ready plots
-    no_shift_avg_correlation.png
-    combined_total_mse.png
-    ...
-  data/                     # Exported data
-    aggregated_metrics.csv   # Statistics by cycle
-    summary_table.md        # Final performance summary
-    raw_data.csv           # Complete raw data
-  config.json              # Analysis configuration
-  README.md                # Results interpretation
+results_analysis/
+  plots/
+    n_acquire_per_cycle=5000_10000_20000/        # Compared variable + values
+      all/                                         # Constants signature (or specific values)
+        no_shift/
+          avg_correlation/
+            no_shift_avg_correlation.png
+          total_mse/
+            no_shift_total_mse.png
+          dev_mse/
+            no_shift_dev_mse.png
+          ...
+        low_shift/
+          ...
+        combined/
+          avg_correlation/
+            combined_avg_correlation.png
+          ...
+  data/
+    n_acquire_per_cycle=5000_10000_20000/
+      all/
+        aggregated_metrics.csv   # Per-cycle statistics for all metrics
+        summary_table.md        # Final performance summary
+        raw_data.csv           # Complete raw data
+  config.json                  # Analysis configuration
 ```
+
+## EvoAug (Evolution-inspired Augmentations)
+
+We support EvoAug-style training for the student (and optionally the oracle) with:
+- Online augmentations during training (one-stage)
+- Two-stage curriculum: pretrain with augmentations, then finetune on clean data
+
+Enable via `trainer.evoaug` in config:
+```
+"evoaug": {
+  "enabled": true,
+  "stage": "both",  // pretrain|finetune|both
+  "augmentations": {
+    "mutation": {"enabled": true, "mutate_frac": 0.05},
+    "translocation": {"enabled": true, "shift_min": 0, "shift_max": 20},
+    "insertion": {"enabled": false},
+    "deletion": {"enabled": true, "delete_min": 0, "delete_max": 30},
+    "inversion": {"enabled": false},
+    "reverse_complement": {"enabled": false},
+    "noise": {"enabled": true, "noise_mean": 0, "noise_std": 0.3}
+  },
+  "max_augs_per_sequence": 2,
+  "mode": "hard"
+}
+```
+
+Directory naming reflects EvoAug usage:
+- Oracle:
+  - `5dreamrnn` (no EvoAug)
+  - `5dreamrnn+evoaug_mut_trans_del3` (with EvoAug)
+- Student:
+  - `train_scratch` (no EvoAug)
+  - `train_scratch+evoaug_pretrain(mut_del_noise2_hard)+finetune(clean)` (two-stage)
+
+## Oracle-labeled Genomic Datasets
+
+For consistency across shifts, we provide `no_shift_oracle` datasets (genomic sequences labeled by the oracle):
+- Generated by `scripts/generate_test_val_datasets.py`
+- Output under `data/test_val_sets/deepstarr/no_shift_oracle/{test.txt,val.txt}`
+
+To use for validation, set `validation_dataset` to `val_genomic_oracle` (or `no_shift_oracle`).
+
+Reproducibility is managed with DVC:
+- Stage: `generate_test_val_datasets_deepstarr`
+- Outs include `no_shift`, `no_shift_oracle`, `low_shift`, `high_shift_low_activity`
 
 ## Available Experiments
 

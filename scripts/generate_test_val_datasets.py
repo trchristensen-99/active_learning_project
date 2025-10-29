@@ -111,9 +111,27 @@ def generate_dataset_type(
     
     # Generate sequences
     size = len(genomic_sequences)
-    if dataset_type == 'no_shift':
+    if dataset_type in ('no_shift', 'no_shift_oracle'):
         sequences = generator.generate(size, genomic_sequences=genomic_sequences)
-        labels = genomic_labels  # Use original labels
+        if dataset_type == 'no_shift':
+            labels = genomic_labels  # Use original labels
+        else:
+            # Label genomic sequences with oracle for consistency
+            print(f"Labeling {len(sequences)} genomic sequences with oracle (no_shift_oracle)...")
+            batch_size = 5000
+            all_labels = []
+            total_batches = (len(sequences) + batch_size - 1) // batch_size
+            for batch_idx in range(total_batches):
+                start_idx = batch_idx * batch_size
+                end_idx = min(start_idx + batch_size, len(sequences))
+                batch_seqs = sequences[start_idx:end_idx]
+                batch_labels = oracle.predict(batch_seqs)
+                all_labels.append(batch_labels)
+                progress = (batch_idx + 1) / total_batches
+                if (batch_idx + 1) % max(1, total_batches // 10) == 0 or batch_idx + 1 == total_batches:
+                    print(f"    Progress: {progress*100:.0f}% ({end_idx}/{len(sequences)} sequences labeled)")
+            labels = np.vstack(all_labels)
+            print(f"Oracle labeling complete. Label shape: {labels.shape}")
     else:
         # Generate sequences
         if dataset_type == 'low_shift':

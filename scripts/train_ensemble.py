@@ -25,6 +25,65 @@ sys.path.insert(0, str(project_root))
 
 from code.models import build_model, get_model_config
 from code.prixfixe import DREAMRNNTrainer
+# Using official evoaug package inside trainer; no custom augmentor here
+
+
+def _build_evoaug_signature_simple(evoaug_cfg: Dict[str, Any]) -> str:
+    """Build EvoAug signature for directory naming (simplified version)."""
+    if not evoaug_cfg or not evoaug_cfg.get('enabled', False):
+        return ''
+    
+    def fmt_num(val: Any) -> str:
+        if isinstance(val, float):
+            s = f"{val:.6f}".rstrip('0').rstrip('.')
+            s = s.replace('.', 'p')
+            return s
+        return str(val)
+    
+    max_augs = evoaug_cfg.get('max_augs_per_sequence', evoaug_cfg.get('max_augs', 2))
+    mode = evoaug_cfg.get('mode', 'hard')
+    augs = evoaug_cfg.get('augmentations', {})
+    
+    short_map = {
+        'mutation': 'mut',
+        'translocation': 'trans',
+        'insertion': 'ins',
+        'deletion': 'del',
+        'inversion': 'inv',
+        'reverse_complement': 'rc',
+        'noise': 'noise'
+    }
+    
+    # Supported params per aug
+    aug_param_keys = {
+        'mutation': ['rate'],
+        'translocation': ['shift'],
+        'insertion': ['length', 'len'],
+        'deletion': ['length', 'len'],
+        'inversion': ['length', 'len'],
+        'reverse_complement': ['prob'],
+        'noise': ['sigma', 'std']
+    }
+    
+    enabled_entries = []
+    for aug_name in sorted(augs.keys()):
+        aug_cfg = augs[aug_name]
+        if not isinstance(aug_cfg, dict) or not aug_cfg.get('enabled', False):
+            continue
+        base = short_map.get(aug_name, aug_name)
+        # Collect first present param
+        parts = []
+        for key in aug_param_keys.get(aug_name, []):
+            if key in aug_cfg:
+                parts.append(f"{fmt_num(aug_cfg[key])}")
+                break
+        if parts:
+            enabled_entries.append(base + parts[0])
+        else:
+            enabled_entries.append(base)
+    
+    aug_str = '_'.join(enabled_entries) if enabled_entries else 'none'
+    return f"evoaug_{aug_str}_{max_augs}_{mode}"
 
 
 def train_single_model(
@@ -35,7 +94,8 @@ def train_single_model(
     output_dir: str,
     model_idx: int,
     config: Dict[str, Any],
-    device: torch.device
+    device: torch.device,
+    evoaug_config: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     Train a single model with specified configuration.
@@ -48,6 +108,7 @@ def train_single_model(
         model_idx: Index of this model in the ensemble
         config: Model and training configuration
         device: Device to train on
+        evoaug_config: Optional EvoAug configuration
         
     Returns:
         Dictionary with training results
@@ -81,7 +142,8 @@ def train_single_model(
         num_epochs=config['epochs'],
         lr=config['learning_rate'],
         batch_size=config['batch_size'],
-        n_workers=config.get('n_workers', 4)
+        n_workers=config.get('n_workers', 4),
+        evoaug_config=evoaug_config
     )
     
     # Train model
@@ -117,7 +179,7 @@ def train_single_model(
 def train_single_model_worker(args_tuple):
     """Worker function for parallel training."""
     (model_type, train_data_path, val_data_path, test_data_path, output_dir,
-     model_idx, config, gpu_id) = args_tuple
+     model_idx, config, gpu_id, evoaug_config) = args_tuple
 
     # Set device for this worker
     device = torch.device(f"cuda:{gpu_id}")
@@ -130,7 +192,8 @@ def train_single_model_worker(args_tuple):
         output_dir,
         model_idx,
         config,
-        device
+        device,
+        evoaug_config
     )
 
 
@@ -142,7 +205,8 @@ def train_ensemble_parallel(
     output_dir: str,
     n_models: int,
     config: Dict[str, Any],
-    max_parallel: int
+    max_parallel: int,
+    evoaug_config: Dict[str, Any] = None
 ) -> List[Dict[str, Any]]:
     """
     Train ensemble models in parallel across multiple GPUs.
@@ -155,6 +219,7 @@ def train_ensemble_parallel(
         n_models: Number of models to train
         config: Training configuration
         max_parallel: Maximum number of parallel workers
+        evoaug_config: Optional EvoAug configuration
         
     Returns:
         List of training results
@@ -167,7 +232,7 @@ def train_ensemble_parallel(
         gpu_id = i % num_gpus  # Distribute models across available GPUs
         args_tuple = (
             model_type, train_data_path, val_data_path, test_data_path, output_dir,
-            i, config, gpu_id
+            i, config, gpu_id, evoaug_config
         )
         worker_args.append(args_tuple)
     
@@ -176,7 +241,7 @@ def train_ensemble_parallel(
     with ThreadPoolExecutor(max_workers=max_parallel) as executor:
         # Submit all training jobs
         future_to_model = {
-            executor.submit(train_single_model_worker, args): args[4] 
+            executor.submit(train_single_model_worker, args): args[5]  # args[5] is model_idx
             for args in worker_args
         }
         
@@ -249,6 +314,12 @@ def main():
     parser.add_argument("--lstm_hidden_channels", type=int, default=320,
                        help="LSTM hidden size")
     
+    # EvoAug configuration
+    parser.add_argument("--evoaug-config", help="Path to EvoAug config JSON file")
+    parser.add_argument("--evoaug-enabled", action="store_true", help="Enable EvoAug augmentations")
+    parser.add_argument("--evoaug-max-augs", type=int, default=2, help="Maximum augmentations per sequence")
+    parser.add_argument("--evoaug-mode", default="hard", choices=["hard", "soft"], help="EvoAug mode")
+    
     args = parser.parse_args()
     
     # Determine device - GPU REQUIRED for training
@@ -280,6 +351,36 @@ def main():
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Process EvoAug configuration
+    evoaug_config = None
+    if args.evoaug_config:
+        with open(args.evoaug_config, 'r') as f:
+            evoaug_config = json.load(f)
+    elif args.evoaug_enabled:
+        # Create default EvoAug config
+        evoaug_config = {
+            "enabled": True,
+            "augmentations": {
+                "mutation": {"enabled": True, "rate": 0.1},
+                "translocation": {"enabled": True, "shift": 0.1},
+                "deletion": {"enabled": True, "length": 0.05}
+            },
+            "max_augs_per_sequence": args.evoaug_max_augs,
+            "mode": args.evoaug_mode
+        }
+    
+    if evoaug_config and evoaug_config.get('enabled', False):
+        print(f"🔬 EvoAug enabled: {evoaug_config}")
+        # Build EvoAug signature for directory naming
+        evoaug_sig = _build_evoaug_signature_simple(evoaug_config)
+        if evoaug_sig:
+            # Create EvoAug subdirectory
+            output_path = Path(args.output_dir)
+            new_output_dir = output_path / evoaug_sig
+            args.output_dir = str(new_output_dir)
+            os.makedirs(args.output_dir, exist_ok=True)
+            print(f"📁 Updated output directory: {args.output_dir}")
     
     # Build configuration
     config = {
@@ -320,7 +421,8 @@ def main():
             args.output_dir,
             args.n_models,
             config,
-            max_parallel
+            max_parallel,
+            evoaug_config
         )
     else:
         # Train ensemble sequentially
@@ -334,7 +436,8 @@ def main():
                 args.output_dir,
                 i,
                 config,
-                device
+                device,
+                evoaug_config
             )
             results.append(result)
     

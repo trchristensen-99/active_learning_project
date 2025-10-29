@@ -20,7 +20,7 @@
       {
         "type": "dream_rnn",
         "count": 5,
-        "model_dir": "models/dream_rnn_ensemble"
+        "model_dir": "models/oracles/deepstarr/dream_rnn"
       }
     ],
     "device": "auto",
@@ -31,8 +31,8 @@
     "training_type": "from_scratch",
     "architecture": "deepstarr",
     "num_epochs": 100,
-    "batch_size": 8192,
-    "lr": 0.001,
+    "batch_size": 128,
+    "lr": 0.002,
     "weight_decay": 1e-6,
     "n_workers": 4,
     "enable_replay": false,

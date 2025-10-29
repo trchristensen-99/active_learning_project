@@ -1,7 +1,7 @@
 """
 Results parser for extracting experiment data from hierarchical directory structure.
 
-Parses the 10-level directory hierarchy and loads all_cycle_results.json files.
+Parses the 11-level directory hierarchy and loads all_cycle_results.json files.
 """
 
 import json
@@ -21,7 +21,7 @@ class ExperimentResult:
         self._load_results()
     
     def _parse_directory_structure(self):
-        """Parse the 10-level directory hierarchy."""
+        """Parse the 11-level directory hierarchy."""
         parts = self.path.parts
         
         # Find the results directory index
@@ -30,11 +30,11 @@ class ExperimentResult:
         except ValueError:
             raise ValueError(f"No 'results' directory found in path: {self.path}")
         
-        # Extract the 10 levels after 'results'
-        if len(parts) < results_idx + 11:
-            raise ValueError(f"Invalid directory structure. Expected 10 levels after 'results', got {len(parts) - results_idx - 1}")
+        # Extract the 11 levels after 'results'
+        if len(parts) < results_idx + 12:
+            raise ValueError(f"Invalid directory structure. Expected 11 levels after 'results', got {len(parts) - results_idx - 1}")
         
-        hierarchy_parts = parts[results_idx + 1:results_idx + 11]
+        hierarchy_parts = parts[results_idx + 1:results_idx + 12]
         
         # Level 1: Dataset
         self.dataset = hierarchy_parts[0]
@@ -69,8 +69,11 @@ class ExperimentResult:
         # Level 9: Validation dataset
         self.validation_dataset = hierarchy_parts[8]
         
-        # Level 10: Run index
-        run_index_str = hierarchy_parts[9]
+        # Level 10: Data source
+        self.data_source = hierarchy_parts[9]
+        
+        # Level 11: Run index
+        run_index_str = hierarchy_parts[10]
         run_match = re.match(r'idx(\d+)', run_index_str)
         if run_match:
             self.run_index = int(run_match.group(1))
@@ -86,11 +89,22 @@ class ExperimentResult:
         with open(results_file, 'r') as f:
             self.raw_results = json.load(f)
         
-        # Organize results by cycle
+        # Organize results by cycle, keeping entry with max training sequences
+        # This handles duplicate entries in existing data
         self.cycle_results = {}
         for result in self.raw_results:
             cycle = result['cycle']
-            self.cycle_results[cycle] = result
+            n_train = result.get('total_training_sequences', 0)
+            
+            if cycle not in self.cycle_results:
+                self.cycle_results[cycle] = result
+            else:
+                # Keep entry with more training data (final trained model)
+                current_n_train = self.cycle_results[cycle].get('total_training_sequences', 0)
+                if n_train > current_n_train:
+                    print(f"Warning: Multiple entries for cycle {cycle} in {self.path.name}. "
+                          f"Keeping entry with n_train={n_train} over {current_n_train}")
+                    self.cycle_results[cycle] = result
     
     def get_metrics(self, cycle: int, test_set: str, metric: str) -> Optional[float]:
         """Extract specific metric for a cycle and test set."""

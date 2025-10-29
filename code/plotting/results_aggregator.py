@@ -33,6 +33,11 @@ class MetricsAggregator:
         all_cycles = sorted(list(all_cycles))
         all_test_sets = sorted(list(all_test_sets))
         all_metrics = sorted(list(all_metrics))
+
+        # Ensure derived metrics are included when their components exist
+        # Add avg_mse when both dev_mse and hk_mse are available
+        if 'dev_mse' in all_metrics and 'hk_mse' in all_metrics and 'avg_mse' not in all_metrics:
+            all_metrics.append('avg_mse')
         
         # Aggregate for each combination
         aggregated = {}
@@ -45,9 +50,15 @@ class MetricsAggregator:
                 for cycle in all_cycles:
                     values = []
                     for exp in experiments:
-                        value = exp.get_metrics(cycle, test_set, metric)
-                        if value is not None:
-                            values.append(value)
+                        if metric == 'avg_mse':
+                            dev_val = exp.get_metrics(cycle, test_set, 'dev_mse')
+                            hk_val = exp.get_metrics(cycle, test_set, 'hk_mse')
+                            if dev_val is not None and hk_val is not None:
+                                values.append((dev_val + hk_val) / 2.0)
+                        else:
+                            value = exp.get_metrics(cycle, test_set, metric)
+                            if value is not None:
+                                values.append(value)
                     
                     if values:
                         stats_dict = self.compute_statistics(values)

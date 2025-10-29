@@ -11,7 +11,7 @@
     "n_initial": 20000
   },
   "oracle": {
-    "model_dir": "models/dream_rnn_ensemble",
+    "model_dir": "models/oracles/deepstarr/dream_rnn",
     "device": "auto",
     "batch_size": 8
   },

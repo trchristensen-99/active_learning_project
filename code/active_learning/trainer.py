@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from abc import ABC, abstractmethod
 
 from .student import DeepSTARRStudent, DeepSTARRTrainer
+from ..augmentations import EvoAugConfig
 from ..utils import one_hot_encode
 
 
@@ -57,9 +58,9 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         seqsize: int = 249,
         in_channels: int = 4,
         num_epochs: int = 100,
-        lr: float = 0.001,
+        lr: float = 0.002,
         weight_decay: float = 1e-6,
-        batch_size: int = 32,
+        batch_size: int = 128,
         n_workers: int = 4,
         enable_replay: bool = False,
         replay_buffer_size: int = 1000,
@@ -68,7 +69,8 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         lr_scheduler: str = "reduce_on_plateau",
         lr_factor: float = 0.2,
         lr_patience: int = 5,
-        finetune_config: Optional[Dict] = None
+        finetune_config: Optional[Dict] = None,
+        seed: int = 42
     ):
         """
         Initialize DeepSTARR active learning trainer.
@@ -118,6 +120,9 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         # Fine-tuning configuration
         self.finetune_config = finetune_config
         
+        # Random seed for model initialization
+        self.seed = seed
+        
         # Model and trainer
         self.model = None
         self.trainer = None
@@ -142,7 +147,7 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         model = DeepSTARRStudent(
             seqsize=self.seqsize,
             in_channels=self.in_channels,
-            generator=torch.Generator().manual_seed(42)
+            generator=torch.Generator().manual_seed(self.seed)
         )
         return model
     
@@ -219,6 +224,55 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         train_data_path = self.model_dir / "temp_train.tsv"
         self._save_data_to_tsv(train_sequences, train_labels, str(train_data_path))
         
+        # Determine EvoAug usage/stage (optional)
+        evoaug_cfg_dict = None
+        evoaug_stage = None
+        trainer_evoaug = kwargs.get('evoaug', None)
+        if trainer_evoaug and trainer_evoaug.get('enabled', False):
+            evoaug_cfg_dict = trainer_evoaug
+            evoaug_stage = trainer_evoaug.get('stage', 'both')  # pretrain|finetune|both
+
+        # If two-stage (pretrain), run pretrain with augmentations, then finetune on clean
+        # Stage 1: pretrain (if configured)
+        pretrain_results = None
+        if evoaug_cfg_dict and evoaug_stage in ('pretrain', 'both'):
+            pretrain_dir = self.model_dir / "pretrain_evoaug"
+            pretrain_dir.mkdir(exist_ok=True)
+            self.model = self._create_model()
+            self.trainer = DeepSTARRTrainer(
+                model=self.model,
+                device=self.device,
+                model_dir=str(pretrain_dir),
+                train_data_path=str(self.model_dir / "temp_train.tsv"),
+                val_sequences=val_seqs,
+                val_labels=val_labs,
+                num_epochs=self.num_epochs,
+                lr=self.lr,
+                weight_decay=self.weight_decay,
+                batch_size=self.batch_size,
+                n_workers=self.n_workers,
+                early_stopping=self.early_stopping,
+                early_stopping_patience=self.early_stopping_patience,
+                lr_scheduler=self.lr_scheduler,
+                lr_factor=self.lr_factor,
+                lr_patience=self.lr_patience,
+                evoaug_config=evoaug_cfg_dict
+            )
+            self.trainer.fit()
+            pretrain_results = {
+                'pretrain_best_val_loss': self.trainer.best_val_loss,
+                'pretrain_model_path': str(pretrain_dir / "model_best_MSE.pth")
+            }
+
+            # Load best pretrain weights into main model
+            self.model = self._create_model()
+            self.model.load_state_dict(torch.load(pretrain_results['pretrain_model_path'], map_location=self.device))
+
+        # Stage 2: finetune (clean by default; can be evoaug if specified)
+        finetune_evoaug_cfg = None
+        if evoaug_cfg_dict and evoaug_stage == 'finetune':
+            finetune_evoaug_cfg = evoaug_cfg_dict
+
         # Create trainer with external validation data
         self.trainer = DeepSTARRTrainer(
             model=self.model,
@@ -236,7 +290,8 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
             early_stopping_patience=self.early_stopping_patience,
             lr_scheduler=self.lr_scheduler,
             lr_factor=self.lr_factor,
-            lr_patience=self.lr_patience
+            lr_patience=self.lr_patience,
+            evoaug_config=finetune_evoaug_cfg
         )
         
         # Train model
@@ -249,11 +304,14 @@ class DeepSTARRActiveLearningTrainer(BaseActiveLearningTrainer):
         if self.enable_replay:
             self._update_replay_buffer(train_sequences, train_labels)
         
-        return {
+        result = {
             'training_type': 'from_scratch',
             'best_val_loss': self.trainer.best_val_loss,
             'model_path': str(self.model_dir / "model_best_MSE.pth")
         }
+        if pretrain_results:
+            result.update(pretrain_results)
+        return result
     
     def fine_tune(
         self,

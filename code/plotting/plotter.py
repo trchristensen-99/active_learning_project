@@ -38,7 +38,8 @@ class ResultsPlotter:
     
     def plot_metric_over_cycles(self, aggregated_data: Dict[str, Dict[str, Dict[int, Dict[str, float]]]], 
                                output_dir: Path, compared_variable: str, compared_values: List[str],
-                               test_set: str, metric: str, plot_format: str = 'png') -> Path:
+                               test_set: str, metric: str, plot_format: str = 'png',
+                               values_sig: str = '', constants_sig: str = '') -> Path:
         """Plot a single metric over cycles for one test set."""
         if test_set not in aggregated_data or metric not in aggregated_data[test_set]:
             raise ValueError(f"No data found for test_set={test_set}, metric={metric}")
@@ -46,6 +47,9 @@ class ResultsPlotter:
         fig, ax = plt.subplots(figsize=self.figure_size, dpi=self.dpi)
         
         colors = sns.color_palette("husl", len(compared_values))
+        
+        # Track all cycles across all values for x-axis
+        all_cycles = []
         
         for i, value in enumerate(compared_values):
             if value not in aggregated_data[test_set][metric]:
@@ -70,6 +74,9 @@ class ResultsPlotter:
             ci_lower_clean = [ci_lower[i] for i in valid_indices]
             ci_upper_clean = [ci_upper[i] for i in valid_indices]
             
+            # Track cycles for x-axis
+            all_cycles.extend(cycles_clean)
+            
             # Plot line
             ax.plot(cycles_clean, means_clean, 
                    color=colors[i], linewidth=2, marker='o', markersize=6,
@@ -86,14 +93,26 @@ class ResultsPlotter:
         ax.grid(True, alpha=0.3)
         ax.legend()
         
-        # Set x-axis to integer ticks
-        ax.set_xticks(range(min(cycles) if cycles else 0, max(cycles) + 1 if cycles else 1))
+        # Set x-axis to integer ticks using all_cycles
+        if all_cycles:
+            ax.set_xticks(range(min(all_cycles), max(all_cycles) + 1))
+        
+        # Auto-scale y-axis to show all data including negative values
+        ax.autoscale(enable=True, axis='y')
         
         plt.tight_layout()
         
+        # Create hierarchical output path: values_sig/constants_sig/test_set/metric/
+        if values_sig and constants_sig:
+            plot_subdir = output_dir / values_sig / constants_sig / test_set / metric
+        else:
+            # Fallback to flat structure if signatures not provided
+            plot_subdir = output_dir
+        plot_subdir.mkdir(parents=True, exist_ok=True)
+        
         # Save plot
         filename = f"{test_set}_{metric}.{plot_format}"
-        output_path = output_dir / filename
+        output_path = plot_subdir / filename
         plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
         plt.close()
         
@@ -101,9 +120,21 @@ class ResultsPlotter:
     
     def plot_combined_test_sets(self, aggregated_data: Dict[str, Dict[str, Dict[int, Dict[str, float]]]], 
                                output_dir: Path, compared_variable: str, compared_values: List[str],
-                               metric: str, plot_format: str = 'png') -> Path:
+                               metric: str, plot_format: str = 'png',
+                               values_sig: str = '', constants_sig: str = '') -> Path:
         """Plot a metric across all test sets in subplots."""
+        # Order test sets so that No Shift (genomic) is on the left and High Shift (random) is on the right
+        # Supports both canonical names (no_shift/high_shift_low_activity) and dataset-based names (val_genomic/val_random)
         test_sets = list(aggregated_data.keys())
+        desired_order = [
+            'no_shift',                 # No Shift (Genomic)
+            'low_shift',                # Optional middle
+            'high_shift_low_activity',  # High Shift (Random)
+            'val_genomic',              # Genomic
+            'val_random'                # Random
+        ]
+        order_map = {name: idx for idx, name in enumerate(desired_order)}
+        test_sets.sort(key=lambda x: order_map.get(x, len(desired_order)))
         n_test_sets = len(test_sets)
         
         if n_test_sets == 0:
@@ -176,13 +207,24 @@ class ResultsPlotter:
             
             if all_cycles:
                 ax.set_xticks(range(min(all_cycles), max(all_cycles) + 1))
+            
+            # Auto-scale y-axis to show all data including negative values
+            ax.autoscale(enable=True, axis='y')
         
         plt.suptitle(f'{self._format_metric_name(metric)} Across Test Sets', fontsize=self.font_size + 4)
         plt.tight_layout()
         
+        # Create hierarchical output path: values_sig/constants_sig/combined/metric/
+        if values_sig and constants_sig:
+            plot_subdir = output_dir / values_sig / constants_sig / "combined" / metric
+        else:
+            # Fallback to flat structure if signatures not provided
+            plot_subdir = output_dir
+        plot_subdir.mkdir(parents=True, exist_ok=True)
+        
         # Save plot
         filename = f"combined_{metric}.{plot_format}"
-        output_path = output_dir / filename
+        output_path = plot_subdir / filename
         plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
         plt.close()
         
@@ -190,7 +232,8 @@ class ResultsPlotter:
     
     def plot_all_metrics(self, aggregated_data: Dict[str, Dict[str, Dict[int, Dict[str, float]]]], 
                         output_dir: Path, compared_variable: str, compared_values: List[str],
-                        metrics: List[str], plot_format: str = 'png') -> List[Path]:
+                        metrics: List[str], plot_format: str = 'png',
+                        values_sig: str = '', constants_sig: str = '') -> List[Path]:
         """Plot all specified metrics."""
         output_paths = []
         
@@ -206,7 +249,7 @@ class ResultsPlotter:
                 try:
                     path = self.plot_metric_over_cycles(
                         aggregated_data, plots_dir, compared_variable, compared_values,
-                        test_set, metric, plot_format
+                        test_set, metric, plot_format, values_sig, constants_sig
                     )
                     output_paths.append(path)
                 except ValueError as e:
@@ -216,7 +259,7 @@ class ResultsPlotter:
             try:
                 path = self.plot_combined_test_sets(
                     aggregated_data, plots_dir, compared_variable, compared_values,
-                    metric, plot_format
+                    metric, plot_format, values_sig, constants_sig
                 )
                 output_paths.append(path)
             except ValueError as e:

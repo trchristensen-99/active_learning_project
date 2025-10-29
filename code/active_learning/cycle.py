@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import os
 import json
+import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
@@ -20,6 +21,9 @@ from .trainer import BaseActiveLearningTrainer, DeepSTARRActiveLearningTrainer
 from .config_manager import ConfigurationManager
 from .checkpoint import CheckpointManager
 from ..utils import one_hot_encode
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 
 class ActiveLearningCycle:
@@ -158,33 +162,43 @@ class ActiveLearningCycle:
         Returns:
             Cycle results dictionary
         """
+        logger.info(f"=== Starting Cycle {cycle_idx} ===")
         print(f"\n=== Active Learning Cycle {cycle_idx + 1}/{self.n_cycles} ===")
+        logger.info(f"Current training sequences: {len(self.training_sequences)}")
         
         # Step 1: Generate candidate sequences
+        logger.info(f"Generating {self.n_candidates_per_cycle} candidate sequences...")
         print(f"1. Generating {self.n_candidates_per_cycle} candidate sequences...")
         candidate_sequences = self.proposal_strategy.propose_sequences(
             self.n_candidates_per_cycle
         )
+        logger.info(f"Generated {len(candidate_sequences)} candidates")
         print(f"   Generated {len(candidate_sequences)} candidates")
         
         # Step 2: Acquire sequences using acquisition function
+        logger.info(f"Selecting {self.n_acquire_per_cycle} sequences for labeling...")
         print(f"2. Selecting {self.n_acquire_per_cycle} sequences for labeling...")
         selected_sequences = self.acquisition_function.select_sequences(
             candidate_sequences,
             self.n_acquire_per_cycle,
             oracle_model=self.oracle
         )
+        logger.info(f"Selected {len(selected_sequences)} sequences")
         print(f"   Selected {len(selected_sequences)} sequences")
         
         # Step 3: Label sequences using oracle
+        logger.info("Labeling selected sequences with oracle...")
         print("3. Labeling selected sequences with oracle...")
         oracle_predictions, oracle_uncertainties = self.oracle.predict_with_uncertainty(
             selected_sequences
         )
+        logger.info(f"Labeled {len(selected_sequences)} sequences")
+        logger.info(f"Mean oracle uncertainty: {np.mean(oracle_uncertainties):.4f}")
         print(f"   Labeled {len(selected_sequences)} sequences")
         print(f"   Mean uncertainty: {np.mean(oracle_uncertainties):.4f}")
         
         # Step 4: Add new data to training set
+        logger.info("Adding new data to training set...")
         print("4. Adding new data to training set...")
         self.training_sequences.extend(selected_sequences)
         if self.training_labels.size == 0:
@@ -192,15 +206,23 @@ class ActiveLearningCycle:
         else:
             self.training_labels = np.vstack([self.training_labels, oracle_predictions])
         
+        logger.info(f"New total training sequences: {len(self.training_sequences)}")
         print(f"   Total training sequences: {len(self.training_sequences)}")
         
         # Step 5: Train/retrain student model
+        logger.info(f"Training model from scratch with {len(self.training_sequences)} sequences")
         print("5. Training student model...")
         training_results = self._train_student_model(cycle_idx)
+        logger.info(f"Training completed. Best val loss: {training_results.get('best_val_loss', 'N/A')}")
         
         # Step 6: Evaluate model performance
+        logger.info("Evaluating model performance on all test sets...")
         print("6. Evaluating model performance...")
         evaluation_results = self._evaluate_model(cycle_idx)
+        
+        # Log evaluation results
+        for test_set, metrics in evaluation_results.items():
+            logger.info(f"{test_set}: avg_corr={metrics.get('avg_correlation', 0):.4f}, mse={metrics.get('total_mse', 0):.4f}")
         
         # Compile cycle results
         cycle_result = {
@@ -215,34 +237,27 @@ class ActiveLearningCycle:
             'timestamp': datetime.now().isoformat()
         }
         
-        self.cycle_results.append(cycle_result)
+        # NOTE: Do NOT append to cycle_results here - it will be added in run_all_cycles
+        # to avoid duplicates when saving to all_cycle_results.json
         
-        # Save cycle results
+        # Save cycle results to individual cycle directory
         self._save_cycle_results(cycle_idx, cycle_result)
+        logger.info(f"Saved results for cycle {cycle_idx} to {self.output_dir}/cycle_{cycle_idx:02d}")
         
         print(f"Cycle {cycle_idx + 1} completed successfully!")
         return cycle_result
     
     def _train_student_model(self, cycle_idx: int) -> Dict[str, Any]:
-        """Train the student model."""
-        # Create validation split (20% of training data)
-        n_total = len(self.training_sequences)
-        n_val = int(0.2 * n_total)
-        
-        # Random split
-        indices = np.random.permutation(n_total)
-        val_indices = indices[:n_val]
-        train_indices = indices[n_val:]
-        
-        train_sequences = [self.training_sequences[i] for i in train_indices]
-        train_labels = self.training_labels[train_indices]
-        val_sequences = [self.training_sequences[i] for i in val_indices]
-        val_labels = self.training_labels[val_indices]
+        """Train the student model using external validation set."""
+        # Use all training data (no splitting) - validation set is external
+        train_sequences = self.training_sequences
+        train_labels = self.training_labels
         
         # Train model
         if self.training_strategy == "from_scratch" or cycle_idx == 0:
+            # Pass None for val_sequences/val_labels to use external validation set
             training_results = self.trainer.train_from_scratch(
-                train_sequences, train_labels, val_sequences, val_labels
+                train_sequences, train_labels, None, None
             )
         else:  # fine_tune
             training_results = self.trainer.fine_tune(
@@ -344,48 +359,62 @@ class ActiveLearningCycle:
         """
         Run all active learning cycles with automatic resumption from checkpoints.
         
+        n_cycles=5 means 5 AL iterations AFTER initial model, producing cycles 0-5:
+        - Cycle 0: Initial model evaluation (no data acquisition)
+        - Cycles 1-5: Active learning iterations (acquire data, train, evaluate)
+        
         Returns:
             List of cycle results
         """
         # Determine starting round
         start_round = self.last_completed_round + 1
         
-        # Check if already complete
+        # Check if already complete (n_cycles AL iterations + cycle 0 = n_cycles + 1 total)
         if start_round > self.n_cycles:
-            print(f"\n*** All {self.n_cycles} cycles already completed! ***")
+            print(f"\n*** All {self.n_cycles + 1} cycles (0-{self.n_cycles}) already completed! ***")
             print(f"Results are in: {self.output_dir}")
             return self._load_final_results()
         
-        print(f"Starting active learning with {self.n_cycles} cycles...")
+        logger.info(f"Starting active learning with {self.n_cycles} AL cycles (cycles 0-{self.n_cycles})")
+        print(f"Starting active learning with {self.n_cycles} AL cycles...")
         print(f"Initial training sequences: {len(self.training_sequences)}")
         print(f"Training strategy: {self.training_strategy}")
-        print(f"Starting from round {start_round} (0=baseline, 1-{self.n_cycles}=AL cycles)")
+        print(f"Starting from round {start_round} (0=initial model, 1-{self.n_cycles}=AL cycles)")
+        logger.info(f"Starting from round {start_round}")
         
         # Round 0: Baseline training (either on initial data or generated sequences)
         if start_round == 0:
             try:
+                logger.info("=== Starting Round 0 (baseline pretraining) ===")
                 print("\n=== Round 0 (baseline pretraining) ===")
                 
                 # If round 0 strategies are provided, generate and acquire sequences
                 if self.round0_proposal_strategy and self.round0_acquisition_function:
+                    logger.info(f"Generating {self.round0_n_candidates} candidate sequences for pretraining...")
                     print(f"Generating {self.round0_n_candidates} candidate sequences for pretraining...")
                     candidate_sequences = self.round0_proposal_strategy.propose_sequences(
                         self.round0_n_candidates
                     )
+                    logger.info(f"Generated {len(candidate_sequences)} candidates")
                     print(f"   Generated {len(candidate_sequences)} candidates")
                     
+                    logger.info(f"Selecting {self.round0_n_acquire} sequences for pretraining...")
                     print(f"Selecting {self.round0_n_acquire} sequences for pretraining...")
                     selected_sequences = self.round0_acquisition_function.select_sequences(
                         candidate_sequences,
                         self.round0_n_acquire,
                         oracle_model=self.oracle
                     )
+                    logger.info(f"Selected {len(selected_sequences)} sequences")
                     print(f"   Selected {len(selected_sequences)} sequences")
                     
+                    logger.info("Labeling selected sequences with oracle...")
                     print("Labeling selected sequences with oracle...")
                     oracle_predictions, oracle_uncertainties = self.oracle.predict_with_uncertainty(
                         selected_sequences
                     )
+                    logger.info(f"Labeled {len(selected_sequences)} sequences")
+                    logger.info(f"Mean oracle uncertainty: {np.mean(oracle_uncertainties):.4f}")
                     print(f"   Labeled {len(selected_sequences)} sequences")
                     print(f"   Mean uncertainty: {np.mean(oracle_uncertainties):.4f}")
                     
@@ -399,29 +428,28 @@ class ActiveLearningCycle:
                     std_uncertainty = float(np.std(oracle_uncertainties))
                 else:
                     # Use provided initial data
+                    logger.info(f"Using {len(self.training_sequences)} provided initial sequences")
                     print(f"Using {len(self.training_sequences)} provided initial sequences")
                     n_candidates_generated = 0
                     n_sequences_acquired = 0
                     mean_uncertainty = None
                     std_uncertainty = None
                 
-                # Create 80/20 split for training
-                n_total = len(self.training_sequences)
-                if n_total >= 100:
-                    n_val = max(1, int(0.2 * n_total))
-                    indices = np.random.permutation(n_total)
-                    val_indices = indices[:n_val]
-                    train_indices = indices[n_val:]
-                    train_sequences = [self.training_sequences[i] for i in train_indices]
-                    train_labels = self.training_labels[train_indices]
-                    val_sequences = [self.training_sequences[i] for i in val_indices]
-                    val_labels = self.training_labels[val_indices]
-                    results = self.trainer.train_from_scratch(train_sequences, train_labels, val_sequences, val_labels)
-                else:
-                    # If too few for split, train on all and eval on subset
-                    results = self.trainer.train_from_scratch(self.training_sequences, self.training_labels, self.training_sequences, self.training_labels)
+                # Train on all initial data using external validation set
+                logger.info(f"Training initial model with {len(self.training_sequences)} sequences")
+                # Pass None for val_sequences/val_labels to use external validation set
+                results = self.trainer.train_from_scratch(
+                    self.training_sequences, self.training_labels, None, None
+                )
                 
+                logger.info(f"Training completed. Best val loss: {results.get('best_val_loss', 'N/A')}")
+                logger.info("Evaluating initial model on all test sets...")
                 eval_results = self._evaluate_model(-1)
+                
+                # Log evaluation results
+                for test_set, metrics in eval_results.items():
+                    logger.info(f"{test_set}: avg_corr={metrics.get('avg_correlation', 0):.4f}, mse={metrics.get('total_mse', 0):.4f}")
+                
                 round0 = {
                     'cycle': 0,
                     'round': 0,
@@ -447,32 +475,39 @@ class ActiveLearningCycle:
                 self._save_cycle_results(0, round0)
                 with open(self.output_dir / 'round0_results.json', 'w') as f:
                     json.dump(round0, f, indent=2)
+                logger.info("Round 0 completed successfully!")
                 print("Round 0 completed successfully!")
                 start_round = 1
             except Exception as e:
+                logger.error(f"Round 0 failed: {e}", exc_info=True)
                 print(f"Round 0 failed: {e}")
                 raise
         
-        # Run AL cycles starting from start_round
-        for cycle_idx in range(start_round - 1, self.n_cycles):
+        # Run AL cycles 1 through n_cycles (inclusive)
+        # This gives us cycles 0-n_cycles total (n_cycles + 1 evaluations)
+        for cycle_idx in range(start_round, self.n_cycles + 1):
             try:
+                logger.info(f"Starting AL cycle {cycle_idx}/{self.n_cycles}")
                 cycle_result = self.run_cycle(cycle_idx)
                 self.cycle_results.append(cycle_result)
                 
                 # Save checkpoint after each cycle
                 if self.checkpoint_manager:
-                    round_num = cycle_idx + 1  # Round 1-N for cycles 0-(N-1)
                     model_path = cycle_result['training_results'].get('model_path', '')
                     self.checkpoint_manager.save_round_checkpoint(
-                        round_num, self.output_dir, model_path, cycle_result,
+                        cycle_idx, self.output_dir, model_path, cycle_result,
                         self.training_sequences, self.training_labels
                     )
+                logger.info(f"Cycle {cycle_idx} completed and checkpointed")
             except Exception as e:
-                print(f"Error in cycle {cycle_idx + 1}: {e}")
+                logger.error(f"Error in cycle {cycle_idx}: {e}", exc_info=True)
+                print(f"Error in cycle {cycle_idx}: {e}")
                 break
         
         # Save final results
+        logger.info("Saving final results...")
         self._save_final_results()
+        logger.info(f"Active learning completed! Ran {len(self.cycle_results)} cycles (0-{len(self.cycle_results)-1})")
         
         print(f"\nActive learning completed! Ran {len(self.cycle_results)} cycles.")
         return self.cycle_results
@@ -515,8 +550,8 @@ class ActiveLearningCycle:
         # Extract key metrics across cycles
         cycles = [r['cycle'] for r in self.cycle_results]
         uncertainties = [r['mean_oracle_uncertainty'] for r in self.cycle_results if r.get('mean_oracle_uncertainty') is not None]
-        correlations = [r['evaluation_results']['avg_correlation'] for r in self.cycle_results]
-        mses = [r['evaluation_results']['total_mse'] for r in self.cycle_results]
+        correlations = [r['evaluation_results']['no_shift']['avg_correlation'] for r in self.cycle_results]
+        mses = [r['evaluation_results']['no_shift']['total_mse'] for r in self.cycle_results]
         
         summary = {
             'total_cycles': len(self.cycle_results),

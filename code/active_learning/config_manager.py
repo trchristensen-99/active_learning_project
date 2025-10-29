@@ -30,7 +30,7 @@ class ConfigurationManager:
     Example:
         results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/
         100random_acquisition/100000cand_20000acq/init_prop_genomic_acq_random_20k/
-        val_genomic/idx1/
+        val_genomic/ground_truth/idx1/
     """
     
     def __init__(self, config: Dict[str, Any]):
@@ -54,6 +54,7 @@ class ConfigurationManager:
         self.round0_init = self._get_round0_init(config)
         self.training_mode = self._get_training_mode(config)
         self.validation_dataset = self._get_validation_dataset(config)
+        self.data_source = self._get_data_source(config)
         
         # Calculate deterministic seed from index
         # Formula: seed = 42 + index * 1000
@@ -78,9 +79,10 @@ class ConfigurationManager:
             - 5dreamrnn
             - 3deepstarr+5dreamrnn
         """
-        if 'composition' in config.get('oracle', {}):
+        oracle_cfg = config.get('oracle', {})
+        if 'composition' in oracle_cfg:
             # New composition format
-            composition = config['oracle']['composition']
+            composition = oracle_cfg['composition']
             if isinstance(composition, list):
                 # Sort by model type alphabetically
                 sorted_comp = sorted(composition, key=lambda x: x['type'])
@@ -89,24 +91,33 @@ class ConfigurationManager:
                     count = comp.get('count', 1)
                     model_type = comp['type'].replace('_', '').lower()
                     parts.append(f"{count}{model_type}")
-                return '+'.join(parts)
-        
-        # Fallback: infer from model_dir or architecture
-        model_dir = config.get('oracle', {}).get('model_dir', '')
-        architecture = config.get('oracle', {}).get('architecture', 'unknown')
-        
-        # Try to count models in directory
-        if model_dir and Path(model_dir).exists():
-            model_dirs = [d for d in Path(model_dir).iterdir() 
-                         if d.is_dir() and d.name.startswith('model_')]
-            count = len(model_dirs) if model_dirs else 1
+                base = '+'.join(parts)
+            else:
+                base = "unknown"
         else:
-            # Default count for known ensembles
-            count = 5 if 'ensemble' in architecture else 1
-        
-        # Clean architecture name
-        arch_clean = architecture.replace('_ensemble', '').replace('_', '').lower()
-        return f"{count}{arch_clean}"
+            # Fallback: infer from model_dir or architecture
+            model_dir = oracle_cfg.get('model_dir', '')
+            architecture = oracle_cfg.get('architecture', 'unknown')
+            
+            # Try to count models in directory
+            if model_dir and Path(model_dir).exists():
+                model_dirs = [d for d in Path(model_dir).iterdir() 
+                             if d.is_dir() and d.name.startswith('model_')]
+                count = len(model_dirs) if model_dirs else 1
+            else:
+                # Default count for known ensembles
+                count = 5 if 'ensemble' in architecture else 1
+            
+            # Clean architecture name
+            arch_clean = architecture.replace('_ensemble', '').replace('_', '').lower()
+            base = f"{count}{arch_clean}"
+        # Append EvoAug signature if oracle trained with EvoAug
+        evoaug = oracle_cfg.get('evoaug', {})
+        if evoaug and evoaug.get('enabled', False):
+            sig = self._build_evoaug_signature(evoaug)
+            if sig:
+                return f"{base}+{sig}"
+        return base
     
     def _get_student_composition(self, config: Dict[str, Any]) -> str:
         """
@@ -370,6 +381,24 @@ class ConfigurationManager:
         else:
             return "val_unknown"
     
+    def _get_data_source(self, config: Dict[str, Any]) -> str:
+        """
+        Get data source string for directory structure.
+        
+        Distinguishes between ground truth and oracle-labeled data sources.
+        
+        Returns:
+            - "ground_truth" (default, for regular experiments)
+            - "oracle_labels" (when use_oracle_labels is true)
+        """
+        al_config = config.get('active_learning', {})
+        use_oracle_labels = al_config.get('use_oracle_labels', False)
+        
+        if use_oracle_labels:
+            return "oracle_labels"
+        else:
+            return "ground_truth"
+    
     def _get_training_mode(self, config: Dict[str, Any]) -> str:
         """
         Generate training mode string with all parameters encoded.
@@ -385,7 +414,21 @@ class ConfigurationManager:
         strategy = config.get('active_learning', {}).get('training_strategy', 'from_scratch')
         
         if strategy == 'from_scratch':
-            return 'train_scratch'
+            # Add EvoAug signature if enabled
+            trainer_cfg = config.get('trainer', {})
+            evoaug = trainer_cfg.get('evoaug', {})
+            base = 'train_scratch'
+            if evoaug and evoaug.get('enabled', False):
+                stage = evoaug.get('stage', 'both')
+                if stage in ('pretrain', 'both'):
+                    pre_sig = self._build_evoaug_signature(evoaug)
+                    base += f"+evoaug_pretrain({pre_sig})"
+                if stage in ('finetune',):
+                    fin_sig = self._build_evoaug_signature(evoaug)
+                    base += f"+finetune({fin_sig})"
+                elif stage in ('both', 'pretrain'):
+                    base += "+finetune(clean)"
+            return base
         elif strategy == 'fine_tune':
             ft_cfg = config.get('active_learning', {}).get('finetune_config')
             if not ft_cfg:
@@ -423,6 +466,65 @@ class ConfigurationManager:
             return '_'.join(parts)
         else:
             raise ValueError(f"Unknown training_strategy: {strategy}")
+
+    def _build_evoaug_signature(self, evoaug_cfg: Dict[str, Any]) -> str:
+        """Build evoaug signature string including rates/params when provided.
+
+        Format: evoaug_{aug1}{paramSig}_{aug2}{paramSig}...{maxAugs}_{mode}
+        Where paramSig encodes key numeric params compactly (floats with 'p' for decimal).
+        """
+        if not evoaug_cfg or not evoaug_cfg.get('enabled', False):
+            return ''
+
+        def fmt_num(val: Any) -> str:
+            if isinstance(val, float):
+                s = f"{val:.6f}".rstrip('0').rstrip('.')
+                s = s.replace('.', 'p')
+                return s
+            return str(val)
+
+        max_augs = evoaug_cfg.get('max_augs_per_sequence', evoaug_cfg.get('max_augs', 2))
+        mode = evoaug_cfg.get('mode', 'hard')
+        augs = evoaug_cfg.get('augmentations', {})
+
+        # Supported params per aug (common names, in priority order)
+        aug_param_keys = {
+            'mutation': [('rate', 'r'), ('prob', 'p')],
+            'translocation': [('shift', 's'), ('rate', 'r')],
+            'insertion': [('length', 'l'), ('len', 'l'), ('rate', 'r')],
+            'deletion': [('length', 'l'), ('len', 'l'), ('rate', 'r')],
+            'inversion': [('length', 'l'), ('len', 'l'), ('rate', 'r')],
+            'reverse_complement': [('prob', 'p'), ('rate', 'r')],
+            'noise': [('sigma', 's'), ('std', 's')]
+        }
+        short_map = {
+            'mutation': 'mut',
+            'translocation': 'trans',
+            'insertion': 'ins',
+            'deletion': 'del',
+            'inversion': 'inv',
+            'reverse_complement': 'rc',
+            'noise': 'noise'
+        }
+
+        enabled_entries: List[str] = []
+        for aug_name in sorted(augs.keys()):
+            aug_cfg = augs[aug_name]
+            if not isinstance(aug_cfg, dict) or not aug_cfg.get('enabled', False):
+                continue
+            base = short_map.get(aug_name, aug_name)
+            # Collect first present param from list (or multiple if available)
+            parts: List[str] = []
+            for key, abbrev in aug_param_keys.get(aug_name, []):
+                if key in aug_cfg:
+                    parts.append(f"{abbrev}{fmt_num(aug_cfg[key])}")
+            if parts:
+                enabled_entries.append(base + ''.join(parts))
+            else:
+                enabled_entries.append(base)
+
+        aug_str = '_'.join(enabled_entries) if enabled_entries else 'none'
+        return f"evoaug_{aug_str}{max_augs}_{mode}"
     
     def get_run_directory(self) -> Path:
         """
@@ -434,7 +536,12 @@ class ConfigurationManager:
         Example:
             results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/
             100random_acquisition/100000cand_20000acq/init_prop_genomic_acq_random_20k/
-            train_scratch/val_genomic/idx1/
+            train_scratch/val_genomic/ground_truth/idx1/
+            
+            For oracle-labeled experiments:
+            results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/
+            100random_acquisition/100000cand_20000acq/init_prop_genomic_acq_random_20k/
+            train_scratch/val_genomic/oracle_labels/idx1/
         """
         return Path('results') / \
                self.dataset / \
@@ -446,6 +553,7 @@ class ConfigurationManager:
                self.round0_init / \
                self.training_mode / \
                self.validation_dataset / \
+               self.data_source / \
                f"idx{self.run_index}"
     
     def find_last_completed_round(self, run_dir: Path, n_total_cycles: int) -> int:

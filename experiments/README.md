@@ -187,8 +187,8 @@ experiments:
 ```
 
 **Results will be saved to:**
-- Index 1: `results/.../deepstarr_train/init_random_random/idx1/`
-- Index 2: `results/.../deepstarr_train/init_random_uncertainty/idx2/`
+- Index 1: `results/.../init_random_random/train_scratch/val_genomic/ground_truth/idx1/`
+- Index 2: `results/.../init_random_uncertainty/train_scratch/val_genomic/ground_truth/idx2/`
 
 This allows direct comparison of initialization strategies.
 
@@ -256,46 +256,61 @@ Results are automatically organized by configuration:
 
 ```
 results/
-  {proposal_strategy}_proposal/
-    {acquisition_strategy}_acquisition/
-      {n_cand}cand_{n_acq}acq/
-        {student_arch}/
-          {oracle_arch}/
-            {dataset}/
+  {dataset}/
+    {oracle_composition}/
+      {student_composition}/
+        {proposal_strategy}_proposal/
+          {acquisition_strategy}_acquisition/
+            {n_cand}cand_{n_acq}acq/
               {round0_init}/
-                idx{run_index}/
-                  round_000/
-                  round_001/
-                  ...
-                  config.json
-                  summary.json
+                {training_mode}/
+                  {validation_dataset}/
+                    {data_source}/
+                      idx{run_index}/
+                        round_000/
+                        round_001/
+                        ...
+                        config.json
+                        summary.json
 ```
 
 **Directory Structure Explained:**
+- `{dataset}`: Dataset name (e.g., `deepstarr`)
+- `{oracle_composition}`: Oracle ensemble composition (e.g., `5dreamrnn`)
+- `{student_composition}`: Student model composition (e.g., `1deepstarr`)
 - `{proposal_strategy}_proposal`: How sequences are generated (e.g., `random_proposal`)
 - `{acquisition_strategy}_acquisition`: How sequences are selected (e.g., `uncertainty_acquisition`)
-- `{dataset}`: Source dataset name (e.g., `deepstarr_train`)
 - `{round0_init}`: Round 0 initialization method:
   - `init_genomic`: Pretrained on provided genomic sequences
   - `init_random_random`: Pretrained on random proposal + random acquisition
   - `init_random_uncertainty`: Pretrained on random proposal + uncertainty acquisition
+- `{training_mode}`: Training approach (e.g., `train_scratch`, `finetune_lr1e4_50ep_ratio1p0`)
+- `{validation_dataset}`: Validation set used (e.g., `val_genomic`)
+- `{data_source}`: Data source (`ground_truth` or `oracle_labels`)
 
 Example:
 ```
-results/random_proposal/random_acquisition/100000cand_20000acq/deepstarr/dream_rnn_ensemble/deepstarr_train/
+results/deepstarr/5dreamrnn/1deepstarr/random_proposal/random_acquisition/100000cand_20000acq/
 ├── init_genomic/
-│   ├── genomic/          # Trained on genomic validation set
-│   │   ├── idx1/
-│   │   ├── idx2/
-│   │   └── idx3/
-│   └── low_shift/        # Trained on low_shift validation set
-│       ├── idx1/
-│       └── idx2/
+│   └── train_scratch/
+│       └── val_genomic/
+│           ├── ground_truth/    # Regular experiments
+│           │   ├── idx1/
+│           │   ├── idx2/
+│           │   └── idx3/
+│           └── oracle_labels/     # Oracle-labeled experiments
+│               ├── idx1/
+│               └── idx2/
 └── init_random_random/
-    ├── genomic/
-    │   ├── idx1/
-    │   ├── idx2/
-    │   └── idx3/
+    └── train_scratch/
+        └── val_genomic/
+            ├── ground_truth/
+            │   ├── idx1/
+            │   ├── idx2/
+            │   └── idx3/
+            └── oracle_labels/
+                ├── idx1/
+                └── idx2/
 ```
 
 ## Multi-Test Dataset Evaluation

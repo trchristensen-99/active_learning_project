@@ -5,7 +5,7 @@
     "n_initial": 20000
   },
   "oracle": {
-    "model_dir": "models/dream_rnn_ensemble",
+    "model_dir": "models/oracles/deepstarr/dream_rnn",
     "model_type": "dream_rnn",
     "device": "auto",
     "seqsize": 249

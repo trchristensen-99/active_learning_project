@@ -303,7 +303,8 @@ class DREAMRNNTrainer:
         lr: float = 0.005,
         batch_size: int = 32,
         weight_decay: float = 1e-4,
-        n_workers: int = 4
+        n_workers: int = 4,
+        evoaug_config = None
     ):
         self.model = model.to(device)
         self.device = device
@@ -311,6 +312,11 @@ class DREAMRNNTrainer:
         self.num_epochs = num_epochs
         self.lr = lr
         self.batch_size = batch_size
+        self.n_workers = n_workers
+        self.evoaug_config = evoaug_config
+        self._evoaug_augment_list = None
+        self._evoaug_max_augs = 0
+        self._evoaug_mode = 'hard'
         
         # Create model directory
         os.makedirs(model_dir, exist_ok=True)
@@ -464,6 +470,10 @@ class DREAMRNNTrainer:
             dev_target = dev_target.to(self.device)
             hk_target = hk_target.to(self.device)
             
+            # Apply EvoAug augmentations if enabled (using official evoaug package)
+            if self._ensure_evoaug_ready():
+                batch_x = self._apply_evoaug(batch_x)
+            
             # Forward pass with mixed precision
             self.optimizer.zero_grad()
             with autocast():
@@ -483,6 +493,93 @@ class DREAMRNNTrainer:
             num_batches += 1
         
         return total_loss / num_batches if num_batches > 0 else 0.0
+
+    def _ensure_evoaug_ready(self) -> bool:
+        """Initialize evoaug augmentations lazily. Returns True if enabled."""
+        if not self.evoaug_config or not self.evoaug_config.get('enabled', False):
+            return False
+        if self._evoaug_augment_list is not None:
+            return len(self._evoaug_augment_list) > 0
+        try:
+            from evoaug import augment as EA  # type: ignore
+        except Exception:
+            # evoaug not available
+            self._evoaug_augment_list = []
+            return False
+
+        augs_cfg = self.evoaug_config.get('augmentations', {}) or {}
+        in_channels = getattr(self.model, 'in_channels', 4)
+        augment_list = []
+
+        # Helper to add safely
+        def add_aug(name: str, fn):
+            if fn is not None:
+                augment_list.append(fn)
+
+        # Channel-agnostic augments
+        trans_cfg = augs_cfg.get('translocation', {})
+        if trans_cfg.get('enabled', False):
+            shift_min = trans_cfg.get('shift_min', 0)
+            shift_max = trans_cfg.get('shift_max', 30)
+            add_aug('translocation', EA.RandomTranslocation(shift_min=shift_min, shift_max=shift_max))
+
+        noise_cfg = augs_cfg.get('noise', {})
+        if noise_cfg.get('enabled', False):
+            noise_mean = noise_cfg.get('noise_mean', 0.0)
+            noise_std = noise_cfg.get('noise_std', 0.1)
+            add_aug('noise', EA.RandomNoise(noise_mean=noise_mean, noise_std=noise_std))
+
+        # Channel-dependent augments (only safe when 4 channels)
+        if in_channels == 4:
+            mut_cfg = augs_cfg.get('mutation', {})
+            if mut_cfg.get('enabled', False):
+                mutate_frac = mut_cfg.get('mutate_frac', mut_cfg.get('rate', 0.1))
+                add_aug('mutation', EA.RandomMutation(mutate_frac=mutate_frac))
+
+            del_cfg = augs_cfg.get('deletion', {})
+            if del_cfg.get('enabled', False):
+                delete_min = del_cfg.get('delete_min', 0)
+                delete_max = del_cfg.get('delete_max', 30)
+                add_aug('deletion', EA.RandomDeletion(delete_min=delete_min, delete_max=delete_max))
+
+            ins_cfg = augs_cfg.get('insertion', {})
+            if ins_cfg.get('enabled', False):
+                insert_min = ins_cfg.get('insert_min', 0)
+                insert_max = ins_cfg.get('insert_max', 20)
+                add_aug('insertion', EA.RandomInsertion(insert_min=insert_min, insert_max=insert_max))
+
+            inv_cfg = augs_cfg.get('inversion', {})
+            if inv_cfg.get('enabled', False):
+                invert_min = inv_cfg.get('invert_min', 0)
+                invert_max = inv_cfg.get('invert_max', 30)
+                add_aug('inversion', EA.RandomInversion(invert_min=invert_min, invert_max=invert_max))
+
+            rc_cfg = augs_cfg.get('reverse_complement', {})
+            if rc_cfg.get('enabled', False):
+                rc_prob = rc_cfg.get('rc_prob', rc_cfg.get('prob', 0.5))
+                add_aug('rc', EA.RandomRC(rc_prob=rc_prob))
+
+        # Store and params
+        self._evoaug_augment_list = augment_list
+        self._evoaug_max_augs = self.evoaug_config.get('max_augs_per_sequence', self.evoaug_config.get('max_augs', 2))
+        self._evoaug_mode = self.evoaug_config.get('mode', 'hard')
+        return len(self._evoaug_augment_list) > 0
+
+    def _apply_evoaug(self, batch_x: torch.Tensor) -> torch.Tensor:
+        """Apply a random chain of evoaug augmentations to the batch on-GPU."""
+        if not self._evoaug_augment_list:
+            return batch_x
+        # Sample aug chain
+        num_to_apply = min(self._evoaug_max_augs, len(self._evoaug_augment_list))
+        if num_to_apply <= 0:
+            return batch_x
+        idxs = torch.randperm(len(self._evoaug_augment_list), device=batch_x.device)[:num_to_apply].tolist()
+        aug_chain = [self._evoaug_augment_list[i] for i in idxs]
+        # Apply sequentially; official evoaug ops preserve device/dtype
+        x = batch_x
+        for aug in aug_chain:
+            x = aug(x)
+        return x
     
     def _validate_epoch(self) -> float:
         """Validate for one epoch."""

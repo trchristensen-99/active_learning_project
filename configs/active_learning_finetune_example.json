@@ -33,7 +33,7 @@
   },
   "oracle": {
     "composition": [
-      {"type": "dream_rnn", "count": 5, "model_dir": "models/dream_rnn_ensemble"}
+      {"type": "dream_rnn", "count": 5, "model_dir": "models/oracles/deepstarr/dream_rnn"}
     ],
     "device": "auto",
     "batch_size": 1024

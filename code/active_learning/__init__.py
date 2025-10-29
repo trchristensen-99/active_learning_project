@@ -13,6 +13,7 @@ from .trainer import BaseActiveLearningTrainer, DeepSTARRActiveLearningTrainer
 from .cycle import ActiveLearningCycle
 from .config_manager import ConfigurationManager
 from .checkpoint import CheckpointManager
+from .oracle_paths import get_oracle_path, parse_oracle_path
 
 __all__ = [
     "BaseOracle",
@@ -28,7 +29,9 @@ __all__ = [
     "DeepSTARRActiveLearningTrainer",
     "ActiveLearningCycle",
     "ConfigurationManager",
-    "CheckpointManager"
+    "CheckpointManager",
+    "get_oracle_path",
+    "parse_oracle_path"
 ]
 
 

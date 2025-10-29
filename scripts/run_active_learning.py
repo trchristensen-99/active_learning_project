@@ -139,7 +139,7 @@ def load_all_test_datasets(dataset_name: str, validation_dataset: str = 'genomic
     
     # Load all test datasets
     test_datasets = {}
-    test_types = ['no_shift', 'low_shift', 'high_shift_low_activity']
+    test_types = ['no_shift', 'no_shift_oracle', 'low_shift', 'high_shift_low_activity']
     
     for test_type in test_types:
         test_path = base_dir / test_type / 'test.txt'
@@ -154,7 +154,10 @@ def load_all_test_datasets(dataset_name: str, validation_dataset: str = 'genomic
         'genomic': 'no_shift',
         'val_genomic': 'no_shift',
         'noshift': 'no_shift',
-        'no_shift': 'no_shift'
+        'no_shift': 'no_shift',
+        'genomic_oracle': 'no_shift_oracle',
+        'val_genomic_oracle': 'no_shift_oracle',
+        'no_shift_oracle': 'no_shift_oracle'
     }
     
     val_dir_name = val_name_mapping.get(validation_dataset.lower(), validation_dataset)
@@ -190,7 +193,7 @@ def create_oracle(oracle_config: dict) -> EnsembleOracle:
         )
 
 
-def create_trainer(trainer_config: dict) -> DeepSTARRActiveLearningTrainer:
+def create_trainer(trainer_config: dict, seed: int = 42) -> DeepSTARRActiveLearningTrainer:
     """Create student model trainer."""
     return DeepSTARRActiveLearningTrainer(
         model_dir=trainer_config['model_dir'],
@@ -198,9 +201,9 @@ def create_trainer(trainer_config: dict) -> DeepSTARRActiveLearningTrainer:
         seqsize=trainer_config.get('seqsize', 249),
         in_channels=trainer_config.get('in_channels', 4),
         num_epochs=trainer_config.get('num_epochs', 100),
-        lr=trainer_config.get('lr', 0.001),
+        lr=trainer_config.get('lr', 0.002),
         weight_decay=trainer_config.get('weight_decay', 1e-6),
-        batch_size=trainer_config.get('batch_size', 32),
+        batch_size=trainer_config.get('batch_size', 128),
         n_workers=trainer_config.get('n_workers', 4),
         enable_replay=trainer_config.get('enable_replay', False),
         replay_buffer_size=trainer_config.get('replay_buffer_size', 1000),
@@ -208,7 +211,8 @@ def create_trainer(trainer_config: dict) -> DeepSTARRActiveLearningTrainer:
         early_stopping_patience=trainer_config.get('early_stopping_patience', 10),
         lr_scheduler=trainer_config.get('lr_scheduler', 'reduce_on_plateau'),
         lr_factor=trainer_config.get('lr_factor', 0.2),
-        lr_patience=trainer_config.get('lr_patience', 5)
+        lr_patience=trainer_config.get('lr_patience', 5),
+        seed=seed
     )
 
 
@@ -352,7 +356,7 @@ def main():
     oracle = create_oracle(config['oracle'])
     
     # Trainer
-    trainer = create_trainer(config['trainer'])
+    trainer = create_trainer(config['trainer'], seed=deterministic_seed)
     
     # Proposal strategy
     proposal_strategy = create_proposal_strategy(config['proposal_strategy'])

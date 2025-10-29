@@ -168,7 +168,8 @@ class DeepSTARRTrainer:
         early_stopping_patience: int = 10,
         lr_scheduler: str = "reduce_on_plateau",
         lr_factor: float = 0.2,
-        lr_patience: int = 5
+        lr_patience: int = 5,
+        evoaug_config: Optional[dict] = None
     ):
         """
         Initialize trainer.
@@ -198,6 +199,9 @@ class DeepSTARRTrainer:
         self.num_epochs = num_epochs
         self.batch_size = batch_size
         self.n_workers = n_workers
+        
+        # EvoAug configuration (optional, disabled by default)
+        self.evoaug_config = evoaug_config or None
         
         # Early stopping parameters
         self.early_stopping = early_stopping
@@ -316,6 +320,28 @@ class DeepSTARRTrainer:
             batch_x = batch_x.to(self.device)
             dev_target = dev_target.to(self.device)
             hk_target = hk_target.to(self.device)
+            
+            # Optional EvoAug augmentations (online)
+            if self.evoaug_config and self.evoaug_config.get('enabled', False):
+                try:
+                    # Convert from (batch, channels, seq_len) → (batch, seq_len, 4)
+                    # Drop any extra channels beyond A,C,G,T (e.g., reverse-complement indicator)
+                    if batch_x.dim() == 3:
+                        # Ensure we only keep first 4 channels
+                        if batch_x.shape[1] > 4:
+                            batch_x_reduced = batch_x[:, :4, :]
+                        else:
+                            batch_x_reduced = batch_x
+                        batch_x_onehot = batch_x_reduced.permute(0, 2, 1).contiguous()
+                        
+                        from ..augmentations import apply_augmentations
+                        batch_x_aug = apply_augmentations(batch_x_onehot, self.evoaug_config)
+                        
+                        # Convert back to (batch, channels, seq_len)
+                        batch_x = batch_x_aug.permute(0, 2, 1).contiguous()
+                except Exception:
+                    # Fallback silently if augmentation fails for any reason
+                    pass
             
             # Forward pass
             self.optimizer.zero_grad()

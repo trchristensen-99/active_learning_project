@@ -62,6 +62,7 @@ wandb/
 mlruns/
 outputs/
 results/
+results_analysis/
 reports/
 figures/
 

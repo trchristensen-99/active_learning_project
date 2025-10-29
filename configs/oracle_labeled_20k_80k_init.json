@@ -1,30 +1,39 @@
 {
   "run_index": 0,
+  "validation_dataset": "val_genomic",
   "active_learning": {
     "n_cycles": 5,
     "n_candidates_per_cycle": 100000,
     "n_acquire_per_cycle": 20000,
     "training_strategy": "from_scratch",
-    "output_dir": "results/active_learning_full"
+    "use_oracle_labels": true,
+    "oracle_labeled_data_dir": "data/oracle_labels/deepstarr/5dreamrnn/no_shift"
   },
   "data": {
     "initial_data_path": "data/processed/train.txt",
-    "n_initial": 20000,
-    "dataset_name": "train"
+    "n_initial": 80000,
+    "dataset_name": "deepstarr",
+    "genomic_test_path": "data/processed/test.txt",
+    "genomic_val_path": "data/processed/val.txt"
   },
   "oracle": {
-    "model_dir": "models/oracles/deepstarr/dream_rnn",
+    "composition": [
+      {
+        "type": "dream_rnn",
+        "count": 5,
+        "model_dir": "models/oracles/deepstarr/dream_rnn"
+      }
+    ],
     "device": "auto",
-    "batch_size": 1024,
-    "architecture": "dream_rnn_ensemble"
+    "batch_size": 1024
   },
   "trainer": {
-    "model_dir": "results/active_learning_full/student_model",
+    "model_dir": "student_model",
     "training_type": "from_scratch",
     "architecture": "deepstarr",
     "num_epochs": 100,
-    "batch_size": 8192,
-    "lr": 0.001,
+    "batch_size": 128,
+    "lr": 0.002,
     "weight_decay": 1e-6,
     "n_workers": 4,
     "enable_replay": false,
@@ -37,20 +46,10 @@
   },
   "proposal_strategy": {
     "type": "random",
-    "seqsize": 249,
-    "seed": 42
+    "seqsize": 249
   },
   "acquisition_function": {
-    "type": "uncertainty",
-    "seed": 42
-  },
-  "seed": 42,
-  "adaptive_settings": {
-    "gpu_memory_gb": 16.900227072,
-    "candidates_per_cycle": 100000,
-    "acquire_per_cycle": 20000,
-    "oracle_batch_size": 1024,
-    "student_batch_size": 8192,
-    "adaptation_reason": "Adjusted for 16.9GB GPU memory"
+    "type": "random"
   }
 }
+
