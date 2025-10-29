@@ -39,6 +39,7 @@ stages:
       - data/oracle_labels/deepstarr/5dreamrnn/no_shift/test.txt
 
   train_dream_rnn_ensemble:
+    # Trains canonical DREAM-RNN ensemble (AdamW + OneCycleLR) to base path
     cmd: ./scripts/gpu_wrapper.sh python scripts/train_ensemble.py --model_type dream_rnn --train_data data/processed/train.txt --val_data data/processed/val.txt --test_data data/processed/test.txt --output_dir models/oracles/deepstarr/dream_rnn --n_models 5 --epochs 80 --batch_size 1024 --lr 0.005 --device auto --parallel
     deps:
       - scripts/train_ensemble.py

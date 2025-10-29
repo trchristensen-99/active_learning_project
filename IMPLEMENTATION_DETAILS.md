@@ -368,18 +368,23 @@ results/
           {acquisition_strategy}/         # 5. Acquisition method
             {n_cand}cand_{n_acq}acq/      # 6. Pool sizes
               {round0_init}/              # 7. Initialization
-                {training_mode}/           # 8. Training mode
+                {training_mode}/          # 8. Training mode (e.g., train_scratch, finetune_*)
                   {validation_dataset}/   # 9. Validation set
-                    idx{run_index}/       # 10. Run index
-                      config.json
-                      metadata.json
-                      summary.json
-                      round_000/
-                        model_best.pth
-                        metrics.json
-                        training_data.json
-                      round_001/
-                        ...
+                    {data_source}/        # 10. ground_truth | oracle_labels
+                      idx{run_index}/     # 11. Run index
+                        config.json
+                        metadata.json
+                        summary.json
+                        all_cycle_results.json
+                        cycle_00/
+                          cycle_results.json
+                          training_data.json
+                        round_000/
+                          model_best.pth
+                          metrics.json
+                          training_data.json
+                        round_001/
+                          ...
 ```
 
 ### Level Details
@@ -830,6 +835,15 @@ data/test_val_sets/deepstarr/
     val.txt
 ```
 
+**Oracle-Labeled Dataset Cache:**
+```
+data/oracle_labels/
+  {dataset}/{oracle_sig}/no_shift/
+    train.txt
+    val.txt
+    test.txt
+```
+
 ### Dataset Types
 
 #### No Shift (Genomic)
@@ -949,21 +963,45 @@ results/{dataset}/{oracle_composition}/{student_composition}/
 ```
 results_analysis/
   plots/
-    {compare_var=values}/           # Compared variable + values
-      {constants_sig}/              # Held-constant values or 'all'
-        {test_set}/
-          {metric}/
-            {test_set}_{metric}.png # Individual test set plots
+    {compare_var}={v1}_{v2}_.../        # Compared variable + values
+      {constants_sig}/                  # Signature of held-constant variables (or 'all')
+        {test_set}/                     # no_shift | low_shift | high_shift_low_activity | combined
+          {metric}/                     # avg_correlation | total_mse | ...
+            {test_set}_{metric}.png     # Individual test set plots
         combined/
           {metric}/
-            combined_{metric}.png   # Combined test set plots
+            combined_{metric}.png       # Combined test set plots
   data/
-    {compare_var=values}/
+    {compare_var}={v1}_{v2}_.../
       {constants_sig}/
-        aggregated_metrics.csv      # Per-cycle statistics for all metrics
-        summary_table.md           # Final performance summary
-        raw_data.csv              # Complete raw data
-  config.json                     # Analysis configuration
+        aggregated_metrics.csv          # Per-cycle statistics for all metrics
+        summary_table.md                # Final performance summary (last cycle)
+        raw_data.csv                    # Complete raw data across replicates
+  config.json                           # Analysis configuration used
+```
+
+Constants signature formation:
+- `{constants_sig}` is constructed from all held-constant variables as `key=value` pairs joined by underscores.
+- Keys are sorted alphabetically to ensure determinism.
+- Values reuse abbreviated tokens from the results hierarchy.
+- If no constants are specified, the signature is `all`.
+
+Common keys and encodings used:
+- `dataset=deepstarr`
+- `oracle_composition=5drnn` (alias of `5dreamrnn`)
+- `student_composition=1ds_bs128`
+- `proposal_strategy=rand`
+- `acquisition_strategy=rand`
+- `n_candidates_per_cycle=100000`
+- `n_acquire_per_cycle=20000`
+- `round0_init=gen20k`
+- `training_mode=scratch`
+- `validation_dataset=gen` (for `val_genomic`)
+- `data_source=gt` or `data_source=oracl`
+
+Example constants signature directory:
+```
+acquisition_strategy=rand_data_source=oracl_dataset=deepstarr_n_candidates_per_cycle=100000_oracle_composition=5drnn_proposal_strategy=rand_round0_init=gen20k_student_composition=1ds_bs128_training_mode=scratch_validation_dataset=gen
 ```
 
 ### Statistical Methods
@@ -1169,29 +1207,57 @@ Oracle models are organized hierarchically for better organization and reproduci
 models/
   oracles/
     {dataset}/
-      {architecture}/
+      {architecture}/                    # Canonical: AdamW + OneCycleLR (DREAM standard)
         model_0/
         model_1/
         ...
         training_config.json
         training_results.json
       {architecture}/
-        {evoaug_signature}/
+        {training_variant}/             # Non-canonical training configs
           model_0/
-          model_1/
           ...
-          training_config.json
-          training_results.json
+      {architecture}/
+        {evoaug_signature}/             # EvoAug variants (with canonical training)
+          model_0/
+          ...
+      {architecture}/
+        {training_variant}/
+          {evoaug_signature}/           # EvoAug + non-canonical training
+            model_0/
+            ...
 ```
 
+**Canonical Training (Base Path):**
+
+The base path `models/oracles/{dataset}/dream_rnn/` represents the **canonical DREAM-RNN training procedure**:
+- **Optimizer**: AdamW with `weight_decay=0.01`
+- **Scheduler**: OneCycleLR (learning rate cycles during training)
+- **Gradient Clipping**: Enabled (`max_norm=1.0`)
+
+This matches the training recipe from the DREAM Challenge paper/tutorial. Models using this configuration are placed directly in the base path.
+
+**Training Variants:**
+
+Non-canonical training configurations are placed in subdirectories:
+- `models/oracles/deepstarr/dream_rnn/adam_no_scheduler/` - Old training (Adam, no scheduler, no clipping)
+
+**EvoAug Variants:**
+
+EvoAug-trained models use canonical training by default and are placed in EvoAug signature subdirectories:
+- `models/oracles/deepstarr/dream_rnn/evoaug_del_mut_trans_2_hard/` - EvoAug ensemble with canonical training
+
 **Examples:**
-- `models/oracles/deepstarr/dream_rnn/` - Standard 5-model DREAM-RNN ensemble
-- `models/oracles/deepstarr/dream_rnn/evoaug_del0p05_mut0p1_trans0p1_2_hard/` - EvoAug-trained ensemble
-- `models/oracles/lentimpra/deepstarr/` - DeepSTARR models trained on LentiMPRA data
+- `models/oracles/deepstarr/dream_rnn/` - Canonical 5-model DREAM-RNN ensemble (AdamW+OneCycle)
+- `models/oracles/deepstarr/dream_rnn/evoaug_del_mut_trans_2_hard/` - EvoAug ensemble (canonical training + augmentations)
+- `models/oracles/deepstarr/dream_rnn/adam_no_scheduler/` - Legacy models (archived old training procedure)
 
 ### Training DREAM-RNN Oracle
 
-**Standard Training:**
+**Standard Training (Canonical AdamW + OneCycleLR):**
+
+By default, `DREAMRNNTrainer` now uses canonical training (AdamW + OneCycleLR + gradient clipping), matching the DREAM Challenge training recipe. Training to the base path produces models with this canonical configuration:
+
 ```bash
 # Using DVC
 dvc repro train_dream_rnn_ensemble
@@ -1210,6 +1276,8 @@ python scripts/train_ensemble.py \
   --parallel
 ```
 
+This will produce a canonical ensemble at `models/oracles/deepstarr/dream_rnn/` using AdamW + OneCycleLR.
+
 **With EvoAug Augmentations:**
 ```bash
 python scripts/train_ensemble.py \
@@ -1226,7 +1294,7 @@ python scripts/train_ensemble.py \
   --parallel
 ```
 
-The EvoAug signature will be automatically appended as a subdirectory based on the configuration.
+The EvoAug signature will be automatically appended as a subdirectory (e.g., `dream_rnn/evoaug_del_mut_trans_2_hard/`). EvoAug models use canonical training (AdamW + OneCycleLR) by default.
 
 **Model Files:**
 ```
@@ -1239,9 +1307,60 @@ models/oracles/deepstarr/dream_rnn/
   training_results.json
 ```
 
+**Post-Retraining Reorganization:**
+
+After retraining with corrected hyperparameters completes, models should be reorganized to the canonical structure:
+
+```bash
+cd models/oracles/deepstarr
+
+# 1. Move canonical non-EvoAug models to base path
+cp -r dream_rnn_awd_onecycle_retrain1_sg/model_* dream_rnn/
+cp dream_rnn_awd_onecycle_retrain1_sg/training_*.json dream_rnn/ 2>/dev/null || true
+
+# 2. Move canonical EvoAug models to EvoAug subdirectory
+cd dream_rnn
+if [ -d "../dream_rnn_evoaug_awd_onecycle_retrain1/evoaug_del_mut_trans_2_hard" ]; then
+  cp -r ../dream_rnn_evoaug_awd_onecycle_retrain1/evoaug_del_mut_trans_2_hard/* evoaug_del_mut_trans_2_hard/
+fi
+```
+
+**Final Structure After Reorganization:**
+- `dream_rnn/model_0/` through `dream_rnn/model_4/` - Canonical AdamW+OneCycle models (5 models)
+- `dream_rnn/evoaug_del_mut_trans_2_hard/` - Canonical EvoAug models (3 models)  
+- `dream_rnn/adam_no_scheduler/` - Archived old models (legacy training without scheduler/clipping)
+
+All configs referencing `models/oracles/deepstarr/dream_rnn` will use canonical training (AdamW + OneCycleLR + gradient clipping).
+
 ---
 
 ## EvoAug Integration
+
+### EvoAug Directory Naming
+
+EvoAug models trained with canonical DREAM‑RNN are saved under a subfolder of the base oracle path `models/oracles/{dataset}/dream_rnn/` using this signature:
+
+```
+evoaug_{components}_m{MAX}_{MODE}
+```
+
+Components are included only if enabled and always in this order:
+- mutation → `mut{mutate_frac}` (2 decimals, `.` → `p`, e.g., 0.05 → `mut0p05`)
+- deletion → `del{delete_min}_{delete_max}`
+- translocation → `trans{shift_min}_{shift_max}`
+- insertion → `ins{insert_min}_{insert_max}`
+- inversion → `inv{inv_min}_{inv_max}`
+- reverse_complement → `rc`
+- noise → `noise{noise_std}` (2 decimals, `.` → `p`)
+
+Always append max augmentations and mode:
+- `_m{MAX}` (e.g., `_m2`)
+- `_{MODE}` (`hard` or `soft`)
+
+Example (mutation 0.10, deletion 0–15, translocation 0–30, max_augs=2, mode=hard):
+```
+evoaug_mut0p1_del0_15_trans0_30_m2_hard
+```
 
 ### Config Schema
 

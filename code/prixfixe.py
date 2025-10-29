@@ -302,7 +302,7 @@ class DREAMRNNTrainer:
         num_epochs: int = 80,
         lr: float = 0.005,
         batch_size: int = 32,
-        weight_decay: float = 1e-4,
+        weight_decay: float = 1e-2,
         n_workers: int = 4,
         evoaug_config = None
     ):
@@ -341,9 +341,16 @@ class DREAMRNNTrainer:
             pin_memory=True
         )
         
-        # Setup optimizer and loss
-        self.optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+        # Setup optimizer and loss (AdamW per DREAM tutorial)
+        self.optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
         self.criterion = nn.MSELoss()
+        # One-cycle LR scheduler as in DREAM training recipe
+        self.scheduler = optim.lr_scheduler.OneCycleLR(
+            self.optimizer,
+            max_lr=self.lr,
+            epochs=self.num_epochs,
+            steps_per_epoch=max(1, len(self.train_loader))
+        )
         
         # Mixed precision scaler for faster training
         self.scaler = GradScaler()
@@ -486,8 +493,13 @@ class DREAMRNNTrainer:
             
             # Backward pass with mixed precision
             self.scaler.scale(loss).backward()
+            # Gradient clipping for stability
+            self.scaler.unscale_(self.optimizer)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.scaler.step(self.optimizer)
             self.scaler.update()
+            # Scheduler step per batch (OneCycle)
+            self.scheduler.step()
             
             total_loss += loss.item()
             num_batches += 1

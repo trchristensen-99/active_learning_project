@@ -62,16 +62,36 @@ python scripts/train_ensemble.py \
 ```
 
 **Oracle Directory Structure:**
+
+The base path `models/oracles/{dataset}/dream_rnn/` represents **canonical DREAM-RNN training** (AdamW + OneCycleLR):
 ```
 models/oracles/
   {dataset}/
-    {architecture}/           # Standard models
+    {architecture}/              # Canonical: AdamW + OneCycleLR (default)
       model_0/
       ...
     {architecture}/
-      {evoaug_sig}/          # EvoAug-trained models
+      {training_variant}/        # Non-canonical training configs
         model_0/
         ...
+    {architecture}/
+      {evoaug_sig}/             # EvoAug + canonical training
+        model_0/
+        ...
+
+EvoAug subfolder naming:
+
+```
+evoaug_{components}_m{MAX}_{MODE}
+```
+
+Components (only if enabled; fixed order):
+- `mut{mutate_frac}` (2 decimals, `.`→`p`), `del{min}_{max}`, `trans{min}_{max}`, `ins{min}_{max}`, `inv{min}_{max}`, `rc`, `noise{std}` (2 decimals).
+
+Example:
+```
+models/oracles/deepstarr/dream_rnn/evoaug_mut0p1_del0_15_trans0_30_m2_hard/
+```
 ```
 
 ### 4. Generate Test/Validation Datasets
@@ -123,25 +143,26 @@ results/
           {acquisition_strategy}/  # e.g., 100random_acquisition
             {pool_sizes}/       # e.g., 100000cand_20000acq
               {round0_init}/    # e.g., init_prop_genomic_acq_random_20k
-                {validation}/   # e.g., val_genomic
-                  idx{N}/       # e.g., idx1
-                    config.json
-                    metadata.json
-                    round_000/
-                    round_001/
-                    ...
+                {training_mode}/ # e.g., train_scratch, finetune_*
+                  {validation}/ # e.g., val_genomic
+                    {data_source}/  # ground_truth | oracle_labels
+                      idx{N}/   # e.g., idx1
+                        config.json
+                        metadata.json
+                        round_000/
+                        round_001/
+                        ...
 ```
 
 **Example:**
 ```
 results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/
   100random_acquisition/100000cand_20000acq/
-  init_prop_genomic_acq_random_20k/train_scratch/val_genomic/ground_truth/idx1/
-
-# Oracle-labeled experiments use:
-results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/
-  100random_acquisition/100000cand_20000acq/
-  init_prop_genomic_acq_random_20k/train_scratch/val_genomic/oracle_labels/idx1/
+  init_prop_genomic_acq_random_20k/
+    train_scratch/
+      val_genomic/
+        ground_truth/idx1/
+        oracle_labels/idx1/
 ```
 
 **Key improvements in v2:**
@@ -151,6 +172,51 @@ results/deepstarr/5dreamrnn/1deepstarr/100random_proposal/
 - Detailed initialization (`init_prop_genomic_acq_random_20k`, not `init_genomic`)
 - Clear validation dataset (`val_genomic`, not `genomic`)
 - Data source distinction (`ground_truth` vs `oracle_labels`)
+
+### Folder Structures (Key Directories)
+
+```
+data/
+  processed/
+    train.txt
+    val.txt
+    test.txt
+  test_val_sets/{dataset}/
+    no_shift/{val.txt,test.txt}
+    no_shift_oracle/{val.txt,test.txt}
+    low_shift/{val.txt,test.txt}
+    high_shift_low_activity/{val.txt,test.txt}
+  oracle_labels/
+    {dataset}/{oracle_sig}/no_shift/
+      train.txt
+      val.txt
+      test.txt
+
+models/
+  oracles/
+    {dataset}/
+      dream_rnn/
+        model_0/  # unaugmented (canonical AdamW+OneCycleLR)
+        ...
+        model_4/
+        {evoaug_sig}/
+          model_0/
+          ...
+
+results/
+  {dataset}/{oracle_composition}/{student_composition}/
+    {proposal_strategy}/{acquisition_strategy}/{n_cand}cand_{n_acq}acq/
+      {round0_init}/{training_mode}/{validation_dataset}/{data_source}/idx{N}/
+        round_000/
+        round_001/
+        cycle_00/           # per-cycle summaries
+        ...
+        all_cycle_results.json
+
+logs/
+  experiment_*.log
+  gen_oracle_labels_*.log
+```
 
 ## Configuration
 
@@ -312,29 +378,45 @@ python scripts/analyze_results.py \
 ```
 results_analysis/
   plots/
-    n_acquire_per_cycle=5000_10000_20000/        # Compared variable + values
-      all/                                         # Constants signature (or specific values)
-        no_shift/
-          avg_correlation/
-            no_shift_avg_correlation.png
-          total_mse/
-            no_shift_total_mse.png
-          dev_mse/
-            no_shift_dev_mse.png
-          ...
-        low_shift/
-          ...
+    {compare_var}={v1}_{v2}_.../                # Compared variable + values
+      {constants_sig}/                          # Signature of held-constant variables
+        {test_set}/                             # no_shift | low_shift | high_shift_low_activity | combined
+          {metric}/                             # avg_correlation | total_mse | ...
+            {test_set}_{metric}.png             # Individual test-set plots
         combined/
-          avg_correlation/
-            combined_avg_correlation.png
-          ...
+          {metric}/
+            combined_{metric}.png               # Combined test-set plots
   data/
-    n_acquire_per_cycle=5000_10000_20000/
-      all/
-        aggregated_metrics.csv   # Per-cycle statistics for all metrics
-        summary_table.md        # Final performance summary
-        raw_data.csv           # Complete raw data
-  config.json                  # Analysis configuration
+    {compare_var}={v1}_{v2}_.../
+      {constants_sig}/
+        aggregated_metrics.csv                  # Per-cycle statistics for all metrics
+        summary_table.md                        # Final performance summary (last cycle)
+        raw_data.csv                            # Complete raw data across replicates
+  config.json                                   # Analysis configuration used
+```
+
+Constants signature configuration:
+- The `{constants_sig}` directory encodes all variables held constant for the analysis as `key=value` pairs joined by `"_"`.
+- Keys use analysis-friendly names and are ordered deterministically (alphabetical).
+- Values use the same abbreviated tokens as in the results hierarchy when applicable.
+- If no variables are held constant, `{constants_sig}` is `all`.
+
+Common keys and value encodings:
+- `dataset`: e.g., `deepstarr`
+- `oracle_composition`: e.g., `5drnn` (alias of `5dreamrnn`)
+- `student_composition`: e.g., `1ds_bs128` (model + hyperparam suffix if present)
+- `proposal_strategy`: e.g., `rand`
+- `acquisition_strategy`: e.g., `rand`, `unc`
+- `n_candidates_per_cycle`: e.g., `100000`
+- `n_acquire_per_cycle`: e.g., `5000`
+- `round0_init`: e.g., `gen20k`
+- `training_mode`: e.g., `scratch`, `finetune_lr1e4_50ep_alldata`
+- `validation_dataset`: e.g., `gen` (for `val_genomic`)
+- `data_source`: `gt` (ground_truth) or `oracl` (oracle_labels)
+
+Example constants signature directory:
+```
+acquisition_strategy=rand_data_source=oracl_dataset=deepstarr_n_candidates_per_cycle=100000_oracle_composition=5drnn_proposal_strategy=rand_round0_init=gen20k_student_composition=1ds_bs128_training_mode=scratch_validation_dataset=gen
 ```
 
 ## EvoAug (Evolution-inspired Augmentations)

@@ -25,65 +25,14 @@ sys.path.insert(0, str(project_root))
 
 from code.models import build_model, get_model_config
 from code.prixfixe import DREAMRNNTrainer
+from code.active_learning.oracle_paths import build_evoaug_signature
 # Using official evoaug package inside trainer; no custom augmentor here
 
 
 def _build_evoaug_signature_simple(evoaug_cfg: Dict[str, Any]) -> str:
-    """Build EvoAug signature for directory naming (simplified version)."""
-    if not evoaug_cfg or not evoaug_cfg.get('enabled', False):
-        return ''
-    
-    def fmt_num(val: Any) -> str:
-        if isinstance(val, float):
-            s = f"{val:.6f}".rstrip('0').rstrip('.')
-            s = s.replace('.', 'p')
-            return s
-        return str(val)
-    
-    max_augs = evoaug_cfg.get('max_augs_per_sequence', evoaug_cfg.get('max_augs', 2))
-    mode = evoaug_cfg.get('mode', 'hard')
-    augs = evoaug_cfg.get('augmentations', {})
-    
-    short_map = {
-        'mutation': 'mut',
-        'translocation': 'trans',
-        'insertion': 'ins',
-        'deletion': 'del',
-        'inversion': 'inv',
-        'reverse_complement': 'rc',
-        'noise': 'noise'
-    }
-    
-    # Supported params per aug
-    aug_param_keys = {
-        'mutation': ['rate'],
-        'translocation': ['shift'],
-        'insertion': ['length', 'len'],
-        'deletion': ['length', 'len'],
-        'inversion': ['length', 'len'],
-        'reverse_complement': ['prob'],
-        'noise': ['sigma', 'std']
-    }
-    
-    enabled_entries = []
-    for aug_name in sorted(augs.keys()):
-        aug_cfg = augs[aug_name]
-        if not isinstance(aug_cfg, dict) or not aug_cfg.get('enabled', False):
-            continue
-        base = short_map.get(aug_name, aug_name)
-        # Collect first present param
-        parts = []
-        for key in aug_param_keys.get(aug_name, []):
-            if key in aug_cfg:
-                parts.append(f"{fmt_num(aug_cfg[key])}")
-                break
-        if parts:
-            enabled_entries.append(base + parts[0])
-        else:
-            enabled_entries.append(base)
-    
-    aug_str = '_'.join(enabled_entries) if enabled_entries else 'none'
-    return f"evoaug_{aug_str}_{max_augs}_{mode}"
+    """Back-compat wrapper calling canonical signature builder."""
+    sig = build_evoaug_signature(evoaug_cfg)
+    return sig or ''
 
 
 def train_single_model(
@@ -313,6 +262,14 @@ def main():
                        help="Number of output channels")
     parser.add_argument("--lstm_hidden_channels", type=int, default=320,
                        help="LSTM hidden size")
+    parser.add_argument("--kernel_sizes", nargs='+', type=int, default=[9, 15],
+                       help="Convolution kernel sizes (space-separated)")
+    parser.add_argument("--pool_size", type=int, default=1,
+                       help="MaxPool size after first conv block (1 = no pooling)")
+    parser.add_argument("--dropout1", type=float, default=0.2,
+                       help="Dropout after conv and in LSTM (first block)")
+    parser.add_argument("--dropout2", type=float, default=0.5,
+                       help="Dropout before fully connected layers (final block)")
     
     # EvoAug configuration
     parser.add_argument("--evoaug-config", help="Path to EvoAug config JSON file")
@@ -349,9 +306,6 @@ def main():
     
     print(f"🚀 Using device: {device}")
     
-    # Create output directory
-    os.makedirs(args.output_dir, exist_ok=True)
-    
     # Process EvoAug configuration
     evoaug_config = None
     if args.evoaug_config:
@@ -370,12 +324,19 @@ def main():
             "mode": args.evoaug_mode
         }
     
+    # Note: DREAMRNNTrainer now uses canonical AdamW+OneCycle training by default
+    # The canonical base path models/oracles/{dataset}/dream_rnn/ represents this standard training
+    # Non-canonical training configs should be placed in variant subdirectories
+    
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
+    
     if evoaug_config and evoaug_config.get('enabled', False):
         print(f"🔬 EvoAug enabled: {evoaug_config}")
         # Build EvoAug signature for directory naming
         evoaug_sig = _build_evoaug_signature_simple(evoaug_config)
         if evoaug_sig:
-            # Create EvoAug subdirectory
+            # Create EvoAug subdirectory within the specified output_dir
             output_path = Path(args.output_dir)
             new_output_dir = output_path / evoaug_sig
             args.output_dir = str(new_output_dir)
@@ -396,6 +357,10 @@ def main():
         'in_channels': args.in_channels,
         'out_channels': args.out_channels,
         'lstm_hidden_channels': args.lstm_hidden_channels,
+        'kernel_sizes': args.kernel_sizes,
+        'pool_size': args.pool_size,
+        'dropout1': args.dropout1,
+        'dropout2': args.dropout2,
     }
     
     # Save configuration
