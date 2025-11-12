@@ -62,9 +62,10 @@ def train_single_model(
     Returns:
         Dictionary with training results
     """
-    print(f"Training model {model_idx + 1}/{config['n_models']}")
+    print(f"Training model index {model_idx}")
     
     # Set random seed for reproducibility
+    # Seed is base_seed + model_idx to ensure each model gets a unique seed
     seed = config.get('base_seed', 42) + model_idx
     torch.manual_seed(seed)
     generator = Generator()
@@ -155,7 +156,8 @@ def train_ensemble_parallel(
     n_models: int,
     config: Dict[str, Any],
     max_parallel: int,
-    evoaug_config: Dict[str, Any] = None
+    evoaug_config: Dict[str, Any] = None,
+    start_idx: int = 0
 ) -> List[Dict[str, Any]]:
     """
     Train ensemble models in parallel across multiple GPUs.
@@ -178,10 +180,11 @@ def train_ensemble_parallel(
     # Prepare arguments for each model
     worker_args = []
     for i in range(n_models):
+        model_idx = start_idx + i
         gpu_id = i % num_gpus  # Distribute models across available GPUs
         args_tuple = (
             model_type, train_data_path, val_data_path, test_data_path, output_dir,
-            i, config, gpu_id, evoaug_config
+            model_idx, config, gpu_id, evoaug_config
         )
         worker_args.append(args_tuple)
     
@@ -242,6 +245,8 @@ def main():
                        help="Learning rate")
     parser.add_argument("--base_seed", type=int, default=42,
                        help="Base random seed (each model gets base_seed + model_idx)")
+    parser.add_argument("--start_idx", type=int, default=0,
+                       help="Starting model index (default: 0, use 1 to skip model_0)")
     
     # System configuration
     parser.add_argument("--device", default="auto",
@@ -387,19 +392,22 @@ def main():
             args.n_models,
             config,
             max_parallel,
-            evoaug_config
+            evoaug_config,
+            args.start_idx
         )
     else:
         # Train ensemble sequentially
         results = []
+        start_idx = args.start_idx
         for i in range(args.n_models):
+            model_idx = start_idx + i
             result = train_single_model(
                 args.model_type,
                 args.train_data,
                 args.val_data,
                 args.test_data,
                 args.output_dir,
-                i,
+                model_idx,
                 config,
                 device,
                 evoaug_config

@@ -49,6 +49,22 @@ python scripts/train_ensemble.py \
   --lr 0.005 \
   --parallel
 
+# Train additional models starting from a specific index
+# (useful when model_0 already exists)
+python scripts/train_ensemble.py \
+  --model_type dream_rnn \
+  --train_data data/processed/train.txt \
+  --val_data data/processed/val.txt \
+  --test_data data/processed/test.txt \
+  --output_dir models/oracles/deepstarr/dream_rnn \
+  --n_models 4 \
+  --start_idx 1 \
+  --epochs 80 \
+  --batch_size 1024 \
+  --lr 0.005 \
+  --base_seed 42 \
+  --parallel
+
 # With EvoAug augmentations
 python scripts/train_ensemble.py \
   --model_type dream_rnn \
